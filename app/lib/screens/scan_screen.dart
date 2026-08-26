@@ -96,6 +96,19 @@ class _ScanScreenState extends State<ScanScreen> {
     });
   }
 
+  Future<void> _startDemo() async {
+    TelepoleConnection.blue.stopScan();
+    await _scanSub?.cancel();
+    _scanSub = null;
+    setState(() => _scanning = false);
+
+    _connection.startDemo();
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => DashboardScreen(connection: _connection)),
+    );
+    await _connection.disconnect();
+  }
+
   Future<void> _connect(BluetoothDevice device) async {
     TelepoleConnection.blue.stopScan();
     await _scanSub?.cancel();
@@ -169,7 +182,35 @@ class _ScanScreenState extends State<ScanScreen> {
                     ),
                   ),
           ),
+          _DemoBar(onTap: busy ? null : _startDemo),
         ],
+      ),
+    );
+  }
+}
+
+/// ทางเข้าโหมดสาธิต — ให้ลองใช้แอปได้โดยไม่ต้องมีฮาร์ดแวร์
+class _DemoBar extends StatelessWidget {
+  final VoidCallback? onTap;
+
+  const _DemoBar({this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+        child: OutlinedButton.icon(
+          onPressed: onTap,
+          icon: const Icon(Icons.science_outlined, size: 18),
+          label: const Text('โหมดสาธิต (ไม่ต้องต่ออุปกรณ์)'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            foregroundColor: AppTheme.textMuted,
+            side: const BorderSide(color: AppTheme.outline),
+          ),
+        ),
       ),
     );
   }

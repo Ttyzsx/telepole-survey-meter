@@ -180,6 +180,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     calibration: connection.calibration,
                     onTap: _openCalibration,
                   ),
+                  if (connection.isDemo) ...[
+                    const SizedBox(height: 12),
+                    _DemoPanel(
+                      baseCpm: connection.demoBaseCpm,
+                      onChanged: connection.setDemoBaseCpm,
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   _TrendPanel(
                     history: connection.history,
@@ -234,6 +241,63 @@ class _CalibrationNote extends StatelessWidget {
             const Icon(Icons.chevron_right, size: 16, color: AppTheme.textMuted),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// แถบควบคุมโหมดสาธิต — เลื่อนเพื่อจำลองว่าเข้าใกล้แหล่งกำเนิดรังสี
+class _DemoPanel extends StatelessWidget {
+  final double baseCpm;
+  final ValueChanged<double> onChanged;
+
+  const _DemoPanel({required this.baseCpm, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceAlt,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.science_outlined,
+                  size: 15, color: AppTheme.warn),
+              const SizedBox(width: 6),
+              const Text(
+                'โหมดสาธิต',
+                style: TextStyle(
+                  color: AppTheme.warn,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'ตั้งไว้ ${baseCpm.toStringAsFixed(0)} CPM',
+                style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+              ),
+            ],
+          ),
+          const Text(
+            'ข้อมูลจำลอง ไม่ใช่ค่าที่วัดได้จริง — เลื่อนเพื่อทดสอบระบบเตือน',
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 10, height: 1.5),
+          ),
+          Slider(
+            value: baseCpm.clamp(0, 800),
+            min: 0,
+            max: 800,
+            divisions: 80,
+            activeColor: AppTheme.warn,
+            onChanged: onChanged,
+          ),
+        ],
       ),
     );
   }

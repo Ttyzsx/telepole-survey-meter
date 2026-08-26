@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_classic/flutter_blue_classic.dart';
@@ -28,6 +29,12 @@ class TelepoleConnection extends ChangeNotifier {
 
   MeterCalibration _calibration = const MeterCalibration();
 
+  // โหมดสาธิต: สร้างข้อมูลปลอมในเครื่อง ใช้ทดสอบ UI ได้โดยไม่ต้องมีฮาร์ดแวร์
+  Timer? _demoTimer;
+  final Random _random = Random();
+  double _demoBaseCpm = 25;
+  bool _isDemo = false;
+
   // ค่าสะสมที่แอปอินทิเกรตเอง เพื่อให้เปลี่ยน sensitivity ได้โดยไม่ต้อง flash บอร์ดใหม่
   double _accumulatedUSv = 0;
   DateTime? _lastIntegratedAt;
@@ -38,6 +45,8 @@ class TelepoleConnection extends ChangeNotifier {
   Reading? get latest => _latest;
   List<Reading> get history => List.unmodifiable(_history);
   bool get isConnected => _state == LinkState.connected;
+  bool get isDemo => _isDemo;
+  double get demoBaseCpm => _demoBaseCpm;
 
   MeterCalibration get calibration => _calibration;
 
@@ -58,6 +67,55 @@ class TelepoleConnection extends ChangeNotifier {
       _accumulatedUSv *= previous / next.cpmPerUSvh;
     }
     notifyListeners();
+  }
+
+  /// เริ่มโหมดสาธิต — ป้อนค่าจำลองเข้าทางเดียวกับข้อมูลจริงทุกประการ
+  /// (ผ่าน _integrate และ _history) เพื่อให้สิ่งที่เห็นบนจอสะท้อนโค้ดเส้นทางจริง
+  void startDemo() {
+    _isDemo = true;
+    _history.clear();
+    _accumulatedUSv = 0;
+    _lastIntegratedAt = null;
+    _setState(LinkState.connected);
+
+    _demoTimer?.cancel();
+    _demoTimer = Timer.periodic(const Duration(seconds: 1), (_) => _emitDemoReading());
+  }
+
+  /// ปรับระดับรังสีจำลอง เพื่อทดสอบว่าแถบเตือนและเสียงทำงานถูกต้อง
+  void setDemoBaseCpm(double cpm) {
+    _demoBaseCpm = cpm.clamp(0, 5000);
+    notifyListeners();
+  }
+
+  void _emitDemoReading() {
+    // การสลายตัวของสารกัมมันตรังสีเป็นกระบวนการสุ่มแบบปัวซง
+    // ความเบี่ยงเบนมาตรฐานของจำนวนนับ = รากที่สองของค่าเฉลี่ย
+    // จำลองด้วยการกระจายแบบปกติที่มี sigma = sqrt(mean) ซึ่งใกล้เคียงพอเมื่อค่าไม่น้อยมาก
+    final sigma = sqrt(_demoBaseCpm.clamp(1, double.infinity));
+    final noisy = (_demoBaseCpm + _gaussian() * sigma).clamp(0.0, 99999.0);
+
+    final reading = Reading(
+      cpm: noisy,
+      deviceDoseRate: _calibration.doseRateFor(noisy),
+      deviceAccumulated: _accumulatedUSv,
+      timestamp: DateTime.now(),
+    );
+
+    _integrate(reading);
+    _latest = reading;
+    _history.add(reading);
+    if (_history.length > maxHistory) {
+      _history.removeRange(0, _history.length - maxHistory);
+    }
+    notifyListeners();
+  }
+
+  /// สุ่มค่าจากการกระจายแบบปกติ ค่าเฉลี่ย 0 ส่วนเบี่ยงเบน 1 (Box-Muller)
+  double _gaussian() {
+    final u1 = 1.0 - _random.nextDouble(); // เลี่ยง log(0)
+    final u2 = _random.nextDouble();
+    return sqrt(-2.0 * log(u1)) * cos(2.0 * pi * u2);
   }
 
   /// ขอ permission ที่จำเป็น (Android 12+ ใช้ BLUETOOTH_CONNECT/SCAN,
@@ -183,6 +241,9 @@ class TelepoleConnection extends ChangeNotifier {
   }
 
   Future<void> disconnect() async {
+    _demoTimer?.cancel();
+    _demoTimer = null;
+    _isDemo = false;
     await _sub?.cancel();
     _sub = null;
     try {
@@ -208,6 +269,7 @@ class TelepoleConnection extends ChangeNotifier {
 
   @override
   void dispose() {
+    _demoTimer?.cancel();
     _sub?.cancel();
     _connection?.dispose();
     super.dispose();
