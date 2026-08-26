@@ -167,8 +167,10 @@ flutter pub get
 
 1. เปิด `android/app/src/main/AndroidManifest.xml` แล้ววาง permission จาก `android_manifest_snippet.xml`
 2. ตั้ง `minSdkVersion 21` ใน `android/app/build.gradle`
-3. วางไฟล์เสียงเตือนที่ `app/assets/alarm.wav` (ถ้าไม่วาง แอปจะเตือนด้วยการสั่นอย่างเดียว โดยไม่ crash)
-4. `flutter run`
+3. `flutter run`
+
+ไฟล์เสียงเตือน `app/assets/alarm.wav` มีอยู่ในรีโปแล้ว สร้างจาก `tool/make_alarm_wav.py`
+อยากเปลี่ยนเสียงดูวิธีใน `app/assets/README.md`
 
 ### แพ็กเกจที่ใช้
 

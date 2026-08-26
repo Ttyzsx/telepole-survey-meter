@@ -23,6 +23,16 @@ class AlarmService {
     _initialized = true;
     _hasVibrator = await Vibration.hasVibrator() ?? false;
     await _player.setReleaseMode(ReleaseMode.stop);
+
+    // นี่คือเสียงเตือนภัย ไม่ใช่เสียงแจ้งเตือนทั่วไป จึงต้องดังแม้มือถืออยู่โหมดเงียบ
+    // ผู้ใช้ปิดเสียงเองได้จากปุ่ม mute บน dashboard ถ้าไม่ต้องการ
+    try {
+      await _player.setAudioContext(
+        AudioContextConfig(respectSilence: false, stayAwake: true).build(),
+      );
+    } on Exception {
+      // บางเครื่องตั้ง audio context ไม่ได้ — ยังเล่นเสียงแบบปกติได้อยู่ ไม่ควรล้ม
+    }
   }
 
   set muted(bool value) {
