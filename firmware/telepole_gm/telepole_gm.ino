@@ -19,10 +19,21 @@ const uint8_t  PIN_BT_TX      = 11;   // Nano D11  -> HC-05 RXD (ผ่าน vo
 const uint8_t  PIN_BUZZER     = 8;    // บัซเซอร์/LED ติ๊กเวลาเจอพัลส์ (ตัวเลือก)
 const uint8_t  PIN_LED_ALARM  = 9;
 
-// ค่าคงที่แปลงหน่วยของหลอด GM (ต้องแก้ให้ตรงกับหลอดที่ใช้จริง)
-//   J305 / J305beta ~ 153.8 CPM ต่อ 1 uSv/h
-//   SBM-20          ~ 150.5 CPM ต่อ 1 uSv/h  (Cs-137)
-//   M4011           ~ 153.8 CPM ต่อ 1 uSv/h
+// ขอบสัญญาณที่ใช้ trigger — ขึ้นกับวงจร interface ของหัววัด
+//   FALLING = พัลส์ active-low (transistor/optocoupler ดึงลง GND) ใช้กับ INPUT_PULLUP
+//   RISING  = พัลส์ active-high
+// ถ้าตั้งผิดขอบ จะยังนับได้แต่ค่าอาจเพี้ยนหรือนับไม่ครบ ควรยืนยันด้วยออสซิลโลสโคป
+const int PULSE_EDGE = FALLING;
+
+// ค่าคงที่แปลงหน่วยของหลอด GM
+//   หลอดสำเร็จรูป (อ้างอิง Cs-137 662 keV จาก datasheet):
+//     J305 / J305beta / M4011 ~ 153.8 CPM ต่อ 1 uSv/h
+//     SBM-20                  ~ 150.5 CPM ต่อ 1 uSv/h
+//
+//   *** หลอด/หัววัดที่ประกอบเอง ไม่มีค่านี้จาก datasheet ***
+//   ค่าด้านล่างเป็นเพียงค่าตั้งต้น ต้องสอบเทียบกับเครื่องมาตรฐานเอง
+//   แอปมีฟังก์ชันสอบเทียบภาคสนาม และคำนวณ uSv/h เองจาก CPM
+//   ดังนั้นไม่จำเป็นต้อง flash บอร์ดใหม่เมื่อเปลี่ยนค่าสอบเทียบ
 const float CPM_PER_USV_H = 153.8f;
 
 const unsigned long REPORT_INTERVAL_MS = 1000UL;  // ส่งข้อมูลทุก 1 วินาที
@@ -67,7 +78,7 @@ void setup() {
   Serial.begin(9600);     // debug ผ่าน USB
   bt.begin(9600);         // HC-05 default baud = 9600
 
-  attachInterrupt(digitalPinToInterrupt(PIN_GM_PULSE), onGeigerPulse, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_GM_PULSE), onGeigerPulse, PULSE_EDGE);
 
   bt.println(F("#TELEPOLE,v1.0,CPM,uSv_h,Accumulated_uSv"));
   Serial.println(F("#TELEPOLE,v1.0,CPM,uSv_h,Accumulated_uSv"));

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_bluetooth_serial_ble/flutter_bluetooth_serial_ble.dart';
+import 'package:flutter_blue_classic/flutter_blue_classic.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/reading.dart';
@@ -12,6 +12,8 @@ enum LinkState { idle, connecting, connected, disconnected, error }
 /// จัดการการเชื่อมต่อ Bluetooth Classic (SPP) กับ HC-05
 /// แปลง byte stream เป็น [Reading] ทีละบรรทัด และเป็นเจ้าของค่าที่ derive มาจาก CPM
 class TelepoleConnection extends ChangeNotifier {
+  static final FlutterBlueClassic blue = FlutterBlueClassic();
+
   BluetoothConnection? _connection;
   StreamSubscription<Uint8List>? _sub;
   String _rxBuffer = '';
@@ -73,16 +75,19 @@ class TelepoleConnection extends ChangeNotifier {
 
   static Future<List<BluetoothDevice>> bondedDevices() async {
     try {
-      return await FlutterBluetoothSerial.instance.getBondedDevices();
+      return await blue.bondedDevices ?? const [];
     } catch (_) {
       return const [];
     }
   }
 
   static Future<bool> ensureBluetoothOn() async {
-    final enabled = await FlutterBluetoothSerial.instance.isEnabled ?? false;
-    if (enabled) return true;
-    return await FlutterBluetoothSerial.instance.requestEnable() ?? false;
+    try {
+      if (await blue.isEnabled) return true;
+      return await blue.turnOn();
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> connect(BluetoothDevice device) async {
@@ -92,7 +97,11 @@ class TelepoleConnection extends ChangeNotifier {
     _setState(LinkState.connecting);
 
     try {
-      final connection = await BluetoothConnection.toAddress(device.address);
+      final connection = await blue.connect(device.address);
+      if (connection == null) {
+        _fail('เชื่อมต่อไม่สำเร็จ — ตรวจสอบว่าจับคู่ HC-05 แล้วและเครื่องเปิดอยู่');
+        return;
+      }
       _connection = connection;
       _rxBuffer = '';
       _lastIntegratedAt = null;
@@ -150,11 +159,10 @@ class TelepoleConnection extends ChangeNotifier {
         _calibration.doseRateFor(reading.cpm) * (deltaMs / 3600000.0);
   }
 
-  Future<void> _send(String command) async {
+  void _send(String command) {
     final connection = _connection;
     if (connection == null || !connection.isConnected) return;
-    connection.output.add(Uint8List.fromList(utf8.encode(command)));
-    await connection.output.allSent;
+    connection.writeString(command);
   }
 
   /// รีเซ็ตค่าสะสมทั้งฝั่งแอปและฝั่ง firmware ('R')
@@ -162,7 +170,7 @@ class TelepoleConnection extends ChangeNotifier {
     _accumulatedUSv = 0;
     _lastIntegratedAt = null;
     notifyListeners();
-    await _send('R');
+    _send('R');
   }
 
   /// รีเซ็ตทุกอย่างรวมถึงหน้าต่างเฉลี่ย CPM ใน firmware ('Z')
@@ -171,7 +179,7 @@ class TelepoleConnection extends ChangeNotifier {
     _lastIntegratedAt = null;
     _history.clear();
     notifyListeners();
-    await _send('Z');
+    _send('Z');
   }
 
   Future<void> disconnect() async {
@@ -201,7 +209,7 @@ class TelepoleConnection extends ChangeNotifier {
   @override
   void dispose() {
     _sub?.cancel();
-    _connection?.close();
+    _connection?.dispose();
     super.dispose();
   }
 }

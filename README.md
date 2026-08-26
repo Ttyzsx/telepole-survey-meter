@@ -123,7 +123,7 @@ flutter pub get
 
 | แพ็กเกจ | หน้าที่ |
 |---|---|
-| `flutter_bluetooth_serial_ble` | Bluetooth **Classic (SPP)** — HC-05 ใช้ SPP ไม่ใช่ BLE จึงใช้ `flutter_blue_plus` ไม่ได้ |
+| `flutter_blue_classic` | Bluetooth **Classic (SPP)** — HC-05 ใช้ SPP ไม่ใช่ BLE จึงใช้ `flutter_blue_plus` ไม่ได้ |
 | `permission_handler` | ขอสิทธิ์ BLUETOOTH_CONNECT/SCAN (Android 12+) และ location (ต่ำกว่า) |
 | `fl_chart` | กราฟเส้น real-time |
 | `vibration` | สั่นเตือน |
@@ -187,15 +187,22 @@ if (random(0, 1000) < 1) {
 
 ## 5. หมายเหตุเรื่องแพ็กเกจบลูทูธ
 
-`flutter_bluetooth_serial_ble` เป็น fork ที่ยังดูแลอยู่ของ `flutter_bluetooth_serial` (ตัวเดิมพังกับ Gradle/AGP รุ่นใหม่เพราะไม่มี `namespace`) API เหมือนกันทุกอย่าง ถ้าจะสลับกลับไปใช้ตัวเดิม แก้แค่ 2 จุด:
+ใช้ `flutter_blue_classic` เพราะแพ็กเกจ SPP ตัวเก่าอย่าง `flutter_bluetooth_serial`
+และ fork ของมัน (`flutter_bluetooth_serial_ble`) ยังใช้ `jcenter()` ใน `build.gradle`
+ซึ่งถูกถอดออกจาก Gradle 7+ แล้ว ทำให้ build ไม่ผ่านบน toolchain ปัจจุบัน
 
-```yaml
-# pubspec.yaml
-flutter_bluetooth_serial: ^0.4.0
-```
-```dart
-// lib/services/telepole_connection.dart และ lib/screens/scan_screen.dart
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+แพ็กเกจนี้ไม่ประกาศ permission ใด ๆ ใน manifest ของตัวเอง เราจึงต้องประกาศเองทั้งหมด
+— สคริปต์ `tool/patch_android.py` ทำให้อัตโนมัติตอน build ใน CI
+
+## 6. Build APK
+
+ทุกครั้งที่ push ขึ้น `main` GitHub Actions จะ build APK ให้อัตโนมัติ
+ดาวน์โหลดได้จากแท็บ **Actions** → เลือก run ล่าสุด → ส่วน **Artifacts**
+
+```bash
+# หรือดาวน์โหลดผ่าน CLI
+gh run download --name telepole-survey-meter-apk
 ```
 
-> โค้ดชุดนี้ยังไม่ได้คอมไพล์ทดสอบ เพราะเครื่องนี้ไม่มี Flutter SDK และ Arduino toolchain ติดตั้งอยู่ — กรุณารัน `flutter analyze` และ verify ด้วย Arduino IDE ก่อนใช้งานจริง
+APK เซ็นด้วย debug key (Flutter ทำให้อัตโนมัติเมื่อไม่มี keystore) ติดตั้งใช้งานได้ปกติ
+แต่อัปโหลดขึ้น Play Store ไม่ได้ ถ้าต้องการก็ต้องสร้าง keystore แล้วเพิ่ม signing config

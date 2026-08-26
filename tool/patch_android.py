@@ -16,6 +16,7 @@ PERMISSIONS = """
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28" />
 
     <!-- Android 12 (API 31) ขึ้นไป -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
