@@ -154,7 +154,8 @@ void loop() {
   unsigned long now = millis();
   if (now - lastReportMs < REPORT_INTERVAL_MS) return;
 
-  // ใช้การบวกเพิ่มแทนการ set = now เพื่อไม่ให้ timing drift สะสม
+  // เก็บช่วงเวลาที่ผ่านไปจริง แล้วใช้มันคำนวณค่าสะสม
+  // จึงไม่มีปัญหา drift แม้ loop จะมาช้ากว่า 1000 ms พอดี
   unsigned long elapsedMs = now - lastReportMs;
   lastReportMs = now;
 
