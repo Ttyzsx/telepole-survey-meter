@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/reading.dart';
 import '../services/alarm_service.dart';
 import '../services/telepole_connection.dart';
+import '../services/tick_service.dart';
 import '../theme.dart';
 import '../widgets/calibration_sheet.dart';
 import '../widgets/trend_chart.dart';
@@ -20,12 +21,14 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final _alarm = AlarmService();
+  final _tick = TickService();
   Thresholds _thresholds = const Thresholds();
 
   @override
   void initState() {
     super.initState();
     _alarm.init();
+    _tick.init();
     widget.connection.addListener(_onReading);
   }
 
@@ -33,12 +36,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     widget.connection.removeListener(_onReading);
     _alarm.dispose();
+    _tick.dispose();
     super.dispose();
   }
 
   void _onReading() {
-    if (widget.connection.latest == null) return;
+    final latest = widget.connection.latest;
+    if (latest == null) return;
     _alarm.update(_thresholds.levelFor(widget.connection.doseRate));
+    _tick.submit(latest.cps);
   }
 
   Future<void> _confirmReset() async {
@@ -101,6 +107,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             title: Text(connection.device?.name ?? 'Telepole'),
             actions: [
               IconButton(
+                tooltip: _tick.isEnabled
+                    ? 'ปิดเสียงคลิกตามอัตรานับ'
+                    : 'เปิดเสียงคลิกตามอัตรานับ',
+                icon: Icon(
+                  Icons.graphic_eq,
+                  color: _tick.isEnabled ? AppTheme.safe : AppTheme.textMuted,
+                ),
+                onPressed: () =>
+                    setState(() => _tick.enabled = !_tick.isEnabled),
+              ),
+              IconButton(
                 tooltip: _alarm.isMuted ? 'เปิดเสียงเตือน' : 'ปิดเสียงเตือน',
                 icon: Icon(_alarm.isMuted ? Icons.volume_off : Icons.volume_up),
                 onPressed: () => setState(() => _alarm.muted = !_alarm.isMuted),
@@ -136,7 +153,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     calibration: connection.calibration,
                   ),
                   const SizedBox(height: 16),
-                  _CpmCard(cpm: latest?.cpm, accent: accent),
+                  _CpmCard(cpm: latest?.cpm, cps: latest?.cps, accent: accent),
                   const SizedBox(height: 12),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -417,9 +434,10 @@ class _StatusBanner extends StatelessWidget {
 /// ตัวเลขหลักของหน้าจอ: CPM ซึ่งเป็นค่าที่หลอด GM วัดได้จริง
 class _CpmCard extends StatelessWidget {
   final double? cpm;
+  final int? cps;
   final Color accent;
 
-  const _CpmCard({required this.cpm, required this.accent});
+  const _CpmCard({required this.cpm, required this.cps, required this.accent});
 
   @override
   Widget build(BuildContext context) {
@@ -463,9 +481,41 @@ class _CpmCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           const Text(
-            'CPM  ·  counts per minute',
+            'CPM  ·  เฉลี่ย 60 วินาที',
             style: TextStyle(color: AppTheme.textMuted, fontSize: 14),
           ),
+          // CPS เป็นค่าดิบของวินาทีล่าสุด ตอบสนองทันทีตอนกวาดหาจุดร้อน
+          // ต่างจาก CPM ด้านบนที่เฉลี่ยมาแล้วจึงขยับช้า
+          if (cps != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceAlt,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppTheme.outline),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '$cps',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: accent,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'CPS  ·  วินาทีล่าสุด',
+                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

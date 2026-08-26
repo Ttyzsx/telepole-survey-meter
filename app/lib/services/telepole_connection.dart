@@ -99,6 +99,7 @@ class TelepoleConnection extends ChangeNotifier {
       cpm: noisy,
       deviceDoseRate: _calibration.doseRateFor(noisy),
       deviceAccumulated: _accumulatedUSv,
+      cps: _poisson(_demoBaseCpm / 60.0),
       timestamp: DateTime.now(),
     );
 
@@ -109,6 +110,26 @@ class TelepoleConnection extends ChangeNotifier {
       _history.removeRange(0, _history.length - maxHistory);
     }
     notifyListeners();
+  }
+
+  /// สุ่มจำนวนเหตุการณ์ในหนึ่งช่วงเวลาตามการแจกแจงปัวซง (อัลกอริทึมของ Knuth)
+  /// ใช้กับค่า CPS จำลอง เพราะจำนวนพัลส์ต่อวินาทีเป็นจำนวนเต็มที่กระจายแบบนี้จริง
+  int _poisson(double lambda) {
+    if (lambda <= 0) return 0;
+    // lambda สูง ๆ วิธีของ Knuth จะช้าและ exp(-lambda) จะลู่เข้าศูนย์จนคำนวณไม่ได้
+    // ที่ระดับนั้นการแจกแจงปกติแทนได้ใกล้เคียงมากอยู่แล้ว
+    if (lambda > 30) {
+      final approx = lambda + _gaussian() * sqrt(lambda);
+      return approx < 0 ? 0 : approx.round();
+    }
+    final threshold = exp(-lambda);
+    var count = 0;
+    var product = _random.nextDouble();
+    while (product > threshold) {
+      count++;
+      product *= _random.nextDouble();
+    }
+    return count;
   }
 
   /// สุ่มค่าจากการกระจายแบบปกติ ค่าเฉลี่ย 0 ส่วนเบี่ยงเบน 1 (Box-Muller)

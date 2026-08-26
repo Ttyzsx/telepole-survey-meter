@@ -8,6 +8,11 @@ class Reading {
   final double cpm;
   final double deviceDoseRate; // uSv/h ตามที่ firmware คำนวณ
   final double deviceAccumulated; // uSv ตามที่ firmware สะสม
+
+  /// จำนวนพัลส์ดิบของวินาทีล่าสุด ไม่ผ่านการเฉลี่ย — ตอบสนองทันที
+  /// เป็น null ถ้าเชื่อมกับ firmware รุ่นเก่าที่ยังส่งมาแค่ 3 ช่อง
+  final int? cps;
+
   final DateTime timestamp;
 
   const Reading({
@@ -15,9 +20,11 @@ class Reading {
     required this.deviceDoseRate,
     required this.deviceAccumulated,
     required this.timestamp,
+    this.cps,
   });
 
-  /// แปลงหนึ่งบรรทัด CSV "CPM,uSv_h,Accumulated_uSv" เป็น [Reading].
+  /// แปลงหนึ่งบรรทัด CSV "CPM,uSv_h,Accumulated_uSv[,CPS]" เป็น [Reading].
+  /// ช่อง CPS เพิ่มมาทีหลัง จึงถือเป็นช่องเสริม — firmware รุ่นเก่าที่ส่งมา 3 ช่องยังใช้ได้
   /// คืน null ถ้าบรรทัดนั้นเป็น comment (#...) หรือรูปแบบไม่ถูกต้อง
   /// เพื่อไม่ให้ข้อมูลขยะทำให้ stream ล้ม
   static Reading? tryParse(String line) {
@@ -33,10 +40,13 @@ class Reading {
     if (cpm == null || rate == null || dose == null) return null;
     if (cpm < 0 || rate < 0 || dose < 0) return null;
 
+    final cps = parts.length >= 4 ? int.tryParse(parts[3].trim()) : null;
+
     return Reading(
       cpm: cpm,
       deviceDoseRate: rate,
       deviceAccumulated: dose,
+      cps: cps != null && cps >= 0 ? cps : null,
       timestamp: DateTime.now(),
     );
   }

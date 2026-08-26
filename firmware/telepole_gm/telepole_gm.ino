@@ -80,8 +80,8 @@ void setup() {
 
   attachInterrupt(digitalPinToInterrupt(PIN_GM_PULSE), onGeigerPulse, PULSE_EDGE);
 
-  bt.println(F("#TELEPOLE,v1.0,CPM,uSv_h,Accumulated_uSv"));
-  Serial.println(F("#TELEPOLE,v1.0,CPM,uSv_h,Accumulated_uSv"));
+  bt.println(F("#TELEPOLE,v1.1,CPM,uSv_h,Accumulated_uSv,CPS"));
+  Serial.println(F("#TELEPOLE,v1.1,CPM,uSv_h,Accumulated_uSv,CPS"));
 
   lastReportMs = millis();
 }
@@ -129,14 +129,17 @@ void handleCommand() {
   }
 }
 
-void report(float cpm, float uSvH) {
-  // รูปแบบ: CPM,uSv_h,Accumulated_uSv
-  char line[48];
+// ช่องที่ 4 (CPS) คือจำนวนพัลส์ดิบของวินาทีที่เพิ่งผ่านไป ไม่ผ่านการเฉลี่ยใด ๆ
+// แอปใช้ค่านี้ขับเสียงคลิกและแสดงค่าที่ตอบสนองทันที ต่างจาก CPM ที่เฉลี่ย 60 วินาที
+void report(float cpm, float uSvH, uint16_t countsThisSecond) {
+  // รูปแบบ: CPM,uSv_h,Accumulated_uSv,CPS
+  char line[64];
   char bufCpm[12], bufRate[12], bufDose[12];
   dtostrf(cpm, 0, 1, bufCpm);
   dtostrf(uSvH, 0, 4, bufRate);
   dtostrf(accumulatedUSv, 0, 4, bufDose);
-  snprintf(line, sizeof(line), "%s,%s,%s", bufCpm, bufRate, bufDose);
+  snprintf(line, sizeof(line), "%s,%s,%s,%u",
+           bufCpm, bufRate, bufDose, countsThisSecond);
   bt.println(line);
   Serial.println(line);
 }
@@ -176,5 +179,5 @@ void loop() {
     tickOffMs = now + 2;
   }
 
-  report(cpm, uSvH);
+  report(cpm, uSvH, (uint16_t)counts);
 }
