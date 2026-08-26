@@ -11,13 +11,13 @@ dependencies:
     sdk: flutter
   # Bluetooth Classic (SPP) — HC-05 ต้องใช้ classic ไม่ใช่ BLE
   flutter_blue_classic: ^0.1.1
-  permission_handler: ^11.3.1
+  permission_handler: ^13.0.1
   fl_chart: ^0.68.0
-  vibration: ^2.0.0
-  audioplayers: ^6.0.0
+  vibration: ^3.2.0
+  audioplayers: ^6.8.1
 
 dev_dependencies:
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
