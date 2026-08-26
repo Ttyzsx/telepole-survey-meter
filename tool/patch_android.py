@@ -11,6 +11,14 @@ from pathlib import Path
 
 MANIFEST = Path("android/app/src/main/AndroidManifest.xml")
 
+# compileSdk ที่ปลั๊กอินต้องการสูงสุด ณ ตอนนี้คือ 37 (permission_handler 13)
+# template ของ flutter ใช้ค่า flutter.compileSdkVersion ซึ่งตามไม่ทัน จึงตั้งตายตัว
+COMPILE_SDK = 37
+GRADLE_FILES = [
+    Path("android/app/build.gradle.kts"),
+    Path("android/app/build.gradle"),
+]
+
 PERMISSIONS = """
     <!-- Android 11 (API 30) และต่ำกว่า -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
@@ -32,10 +40,30 @@ PERMISSIONS = """
 TOOLS_NS = 'xmlns:tools="http://schemas.android.com/tools"'
 
 
+def patch_compile_sdk() -> None:
+    """บังคับ compileSdk ในโมดูล app ให้สูงพอสำหรับปลั๊กอินทุกตัว"""
+    for path in GRADLE_FILES:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        patched, count = re.subn(
+            r"compileSdk\s*(=\s*)?flutter\.compileSdkVersion",
+            f"compileSdk = {COMPILE_SDK}",
+            text,
+        )
+        if count:
+            path.write_text(patched, encoding="utf-8")
+            print(f"[patch_android] {path} -> compileSdk {COMPILE_SDK}")
+        else:
+            print(f"[patch_android] {path}: ไม่พบ compileSdk ที่ต้องแก้", file=sys.stderr)
+
+
 def main() -> int:
     if not MANIFEST.exists():
         print(f"[patch_android] ไม่พบ {MANIFEST} — รัน flutter create ก่อน", file=sys.stderr)
         return 1
+
+    patch_compile_sdk()
 
     source = MANIFEST.read_text(encoding="utf-8")
 
