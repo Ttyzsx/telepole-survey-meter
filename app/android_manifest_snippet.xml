@@ -1,0 +1,35 @@
+<!--
+  วางไว้ใน android/app/src/main/AndroidManifest.xml
+  ภายใน <manifest> เหนือแท็ก <application>
+-->
+
+<!-- Android 11 (API 30) และต่ำกว่า -->
+<uses-permission android:name="android.permission.BLUETOOTH"
+    android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+    android:maxSdkVersion="30" />
+
+<!-- การ discover อุปกรณ์บน Android 6-11 ต้องมีสิทธิ์ location -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+    android:maxSdkVersion="30" />
+
+<!-- Android 12 (API 31) ขึ้นไป -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+    android:usesPermissionFlags="neverForLocation"
+    tools:targetApi="s" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+<uses-permission android:name="android.permission.VIBRATE" />
+
+<!-- ประกาศว่าใช้ Bluetooth classic (ไม่บังคับ ถ้าอยากให้ติดตั้งได้บนเครื่องที่ไม่มี BT ให้ required="false") -->
+<uses-feature android:name="android.hardware.bluetooth" android:required="true" />
+
+<!--
+  หมายเหตุ: แท็ก <manifest> ต้องมี xmlns:tools ด้วย
+  <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+            xmlns:tools="http://schemas.android.com/tools">
+
+  และใน android/app/build.gradle ต้องตั้ง
+      minSdkVersion 21   (หรือสูงกว่า)
+      compileSdkVersion 34
+-->

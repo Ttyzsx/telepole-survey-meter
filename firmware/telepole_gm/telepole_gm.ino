@@ -1,0 +1,168 @@
+/*
+ * Telepole Radiation Survey Meter - Firmware
+ * Target : Arduino Nano (ATmega328P) + HC-05 Bluetooth (SPP)
+ *
+ * - นับพัลส์จากวงจรหัววัด GM ด้วย Hardware Interrupt (INT0 = D2)
+ * - คำนวณ CPM จากหน้าต่างเลื่อน (rolling window) 60 วินาที
+ * - แปลง CPM -> Dose Rate (uSv/h) ด้วยค่าคงที่ของหลอด GM
+ * - สะสมปริมาณรังสี (uSv) โดยอินทิเกรตทุกช่วง 1 วินาที
+ * - ส่ง CSV ออก HC-05 ทุก 1 วินาที : "CPM,uSv_h,Accumulated_uSv\n"
+ * - รับคำสั่งจากแอป : 'R' = reset ค่าสะสม, 'Z' = reset ทั้งหมด, '?' = ส่งข้อมูลทันที
+ */
+
+#include <SoftwareSerial.h>
+
+// ---------------- Configuration ----------------
+const uint8_t  PIN_GM_PULSE   = 2;    // ต้องเป็น D2 หรือ D3 เท่านั้น (INT0 / INT1)
+const uint8_t  PIN_BT_RX      = 10;   // Nano D10  <- HC-05 TXD
+const uint8_t  PIN_BT_TX      = 11;   // Nano D11  -> HC-05 RXD (ผ่าน voltage divider)
+const uint8_t  PIN_BUZZER     = 8;    // บัซเซอร์/LED ติ๊กเวลาเจอพัลส์ (ตัวเลือก)
+const uint8_t  PIN_LED_ALARM  = 9;
+
+// ค่าคงที่แปลงหน่วยของหลอด GM (ต้องแก้ให้ตรงกับหลอดที่ใช้จริง)
+//   J305 / J305beta ~ 153.8 CPM ต่อ 1 uSv/h
+//   SBM-20          ~ 150.5 CPM ต่อ 1 uSv/h  (Cs-137)
+//   M4011           ~ 153.8 CPM ต่อ 1 uSv/h
+const float CPM_PER_USV_H = 153.8f;
+
+const unsigned long REPORT_INTERVAL_MS = 1000UL;  // ส่งข้อมูลทุก 1 วินาที
+const uint8_t  WINDOW_SECONDS = 60;               // หน้าต่างเฉลี่ยของ CPM
+const unsigned long DEBOUNCE_US = 190UL;          // dead time ของหลอด GM (~190us)
+const float ALARM_USV_H = 2.5f;                   // เกณฑ์เตือนที่ตัวเครื่อง
+
+// ---------------- State ----------------
+SoftwareSerial bt(PIN_BT_RX, PIN_BT_TX);
+
+volatile unsigned long pulseCount = 0;      // ตัวนับดิบ แก้ไขใน ISR เท่านั้น
+volatile unsigned long lastPulseMicros = 0;
+
+uint16_t window[WINDOW_SECONDS];            // จำนวนพัลส์ของแต่ละวินาทีย้อนหลัง
+uint8_t  windowIndex = 0;
+uint8_t  windowFilled = 0;                  // จำนวนช่องที่มีข้อมูลจริงแล้ว
+unsigned long windowSum = 0;                // ผลรวมพัลส์ในหน้าต่าง
+
+float accumulatedUSv = 0.0f;                // ปริมาณรังสีสะสมตั้งแต่เปิดเครื่อง
+unsigned long lastReportMs = 0;
+unsigned long tickOffMs = 0;                // เวลาปิดเสียงติ๊ก
+
+// ---------------- ISR ----------------
+// ยิงเมื่อสัญญาณจากวงจร GM ตกลง (active-low pulse จาก transistor/optocoupler)
+void onGeigerPulse() {
+  unsigned long now = micros();
+  if (now - lastPulseMicros < DEBOUNCE_US) return;   // กัน bounce / ringing
+  lastPulseMicros = now;
+  pulseCount++;
+}
+
+// ---------------- Setup ----------------
+void setup() {
+  pinMode(PIN_GM_PULSE, INPUT_PULLUP);
+  pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(PIN_LED_ALARM, OUTPUT);
+  digitalWrite(PIN_BUZZER, LOW);
+  digitalWrite(PIN_LED_ALARM, LOW);
+
+  for (uint8_t i = 0; i < WINDOW_SECONDS; i++) window[i] = 0;
+
+  Serial.begin(9600);     // debug ผ่าน USB
+  bt.begin(9600);         // HC-05 default baud = 9600
+
+  attachInterrupt(digitalPinToInterrupt(PIN_GM_PULSE), onGeigerPulse, FALLING);
+
+  bt.println(F("#TELEPOLE,v1.0,CPM,uSv_h,Accumulated_uSv"));
+  Serial.println(F("#TELEPOLE,v1.0,CPM,uSv_h,Accumulated_uSv"));
+
+  lastReportMs = millis();
+}
+
+// ---------------- Helpers ----------------
+unsigned long takePulseSnapshot() {
+  unsigned long counts;
+  noInterrupts();               // อ่านและเคลียร์แบบ atomic
+  counts = pulseCount;
+  pulseCount = 0;
+  interrupts();
+  return counts;
+}
+
+void pushWindow(uint16_t countsThisSecond) {
+  windowSum -= window[windowIndex];
+  window[windowIndex] = countsThisSecond;
+  windowSum += countsThisSecond;
+  windowIndex = (windowIndex + 1) % WINDOW_SECONDS;
+  if (windowFilled < WINDOW_SECONDS) windowFilled++;
+}
+
+// CPM = (พัลส์รวมในหน้าต่าง / จำนวนวินาทีที่เก็บได้จริง) * 60
+// ช่วงแรกที่ยังเก็บไม่ครบ 60 วินาที จะ scale ขึ้นเพื่อให้ตัวเลขใช้งานได้ทันที
+float computeCpm() {
+  if (windowFilled == 0) return 0.0f;
+  return ((float)windowSum / (float)windowFilled) * 60.0f;
+}
+
+void handleCommand() {
+  while (bt.available()) {
+    char c = bt.read();
+    if (c == 'R' || c == 'r') {
+      accumulatedUSv = 0.0f;
+      bt.println(F("#ACK,RESET_DOSE"));
+    } else if (c == 'Z' || c == 'z') {
+      accumulatedUSv = 0.0f;
+      windowSum = 0; windowIndex = 0; windowFilled = 0;
+      for (uint8_t i = 0; i < WINDOW_SECONDS; i++) window[i] = 0;
+      takePulseSnapshot();
+      bt.println(F("#ACK,RESET_ALL"));
+    } else if (c == '?') {
+      lastReportMs = 0;   // บังคับส่งรอบใหม่ทันที
+    }
+  }
+}
+
+void report(float cpm, float uSvH) {
+  // รูปแบบ: CPM,uSv_h,Accumulated_uSv
+  char line[48];
+  char bufCpm[12], bufRate[12], bufDose[12];
+  dtostrf(cpm, 0, 1, bufCpm);
+  dtostrf(uSvH, 0, 4, bufRate);
+  dtostrf(accumulatedUSv, 0, 4, bufDose);
+  snprintf(line, sizeof(line), "%s,%s,%s", bufCpm, bufRate, bufDose);
+  bt.println(line);
+  Serial.println(line);
+}
+
+// ---------------- Loop ----------------
+void loop() {
+  handleCommand();
+
+  // ปิดเสียงติ๊กหลังผ่านไป 2 ms
+  if (tickOffMs && millis() >= tickOffMs) {
+    digitalWrite(PIN_BUZZER, LOW);
+    tickOffMs = 0;
+  }
+
+  unsigned long now = millis();
+  if (now - lastReportMs < REPORT_INTERVAL_MS) return;
+
+  // ใช้การบวกเพิ่มแทนการ set = now เพื่อไม่ให้ timing drift สะสม
+  unsigned long elapsedMs = now - lastReportMs;
+  lastReportMs = now;
+
+  unsigned long counts = takePulseSnapshot();
+  if (counts > 65535UL) counts = 65535UL;
+  pushWindow((uint16_t)counts);
+
+  float cpm   = computeCpm();
+  float uSvH  = cpm / CPM_PER_USV_H;
+
+  // อินทิเกรตปริมาณสะสม: uSv/h * (ms / 3,600,000) = uSv
+  accumulatedUSv += uSvH * ((float)elapsedMs / 3600000.0f);
+
+  // สัญญาณเตือนที่ตัวเครื่อง
+  digitalWrite(PIN_LED_ALARM, uSvH >= ALARM_USV_H ? HIGH : LOW);
+  if (counts > 0) {                       // ติ๊กเมื่อมีพัลส์ในวินาทีนั้น
+    digitalWrite(PIN_BUZZER, HIGH);
+    tickOffMs = now + 2;
+  }
+
+  report(cpm, uSvH);
+}

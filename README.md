@@ -1,0 +1,201 @@
+# Telepole Radiation Survey Meter
+
+เครื่องสำรวจรังสีแบบก้านยืดหดไร้สาย — หัววัด GM + Arduino Nano ส่งข้อมูลผ่าน HC-05 ไปแสดงผลบนแอป Android (Flutter)
+
+```
+telepole-survey-meter/
+├── firmware/telepole_gm/telepole_gm.ino   # Arduino Nano
+└── app/                                    # Flutter Android
+    ├── pubspec.yaml
+    ├── android_manifest_snippet.xml
+    └── lib/
+        ├── main.dart
+        ├── theme.dart
+        ├── models/reading.dart
+        ├── services/telepole_connection.dart
+        ├── services/alarm_service.dart
+        ├── screens/scan_screen.dart
+        ├── screens/dashboard_screen.dart
+        └── widgets/trend_chart.dart
+```
+
+---
+
+## 1. ฝั่งฮาร์ดแวร์ (Arduino Nano + HC-05)
+
+### การต่อสาย
+
+| Arduino Nano | ต่อไปที่ | หมายเหตุ |
+|---|---|---|
+| **D2** | Pulse OUT ของบอร์ดหัววัด GM | ต้องเป็น D2 หรือ D3 เท่านั้น (INT0/INT1) |
+| D10 (RX) | HC-05 **TXD** | ต่อตรงได้ (3.3V เข้า Nano ถือเป็น HIGH) |
+| D11 (TX) | HC-05 **RXD** | **ต้องผ่าน voltage divider** R1=1kΩ, R2=2kΩ ลง GND |
+| D8 | Buzzer / LED ติ๊ก | ผ่าน R 220Ω (ตัวเลือก) |
+| D9 | LED เตือนสีแดง | ผ่าน R 220Ω (ตัวเลือก) |
+| 5V | VCC ของ HC-05 | HC-05 module ทั่วไปมี regulator บนบอร์ด |
+| GND | GND ร่วมกันทุกตัว | **ต้องต่อ GND ร่วมกัน** ไม่งั้นนับพัลส์เพี้ยน |
+
+```
+   GM Tube board                Arduino Nano                 HC-05
+ ┌──────────────┐            ┌───────────────┐          ┌───────────┐
+ │  HV 400V     │            │               │          │           │
+ │  Pulse OUT ──┼────────────┤ D2 (INT0)     │          │           │
+ │  VCC (5V) ───┼──── 5V ────┤ 5V        D10 ├──────────┤ TXD       │
+ │  GND ────────┼──── GND ───┤ GND       D11 ├──1kΩ──┬──┤ RXD       │
+ └──────────────┘            │               │       │  │           │
+                             │           GND ├───────┴──┤ GND (2kΩ) │
+                             └───────────────┘   2kΩ    └───────────┘
+```
+
+> **เรื่องความปลอดภัย:** บอร์ดหัววัด GM สร้างไฟ 400–500 VDC ห้ามจับตัวเก็บประจุ HV ขณะจ่ายไฟ และให้คายประจุก่อนถอดหลอดเสมอ
+
+### การตั้งค่าใน sketch
+
+แก้ค่าคงที่ในไฟล์ `telepole_gm.ino` ให้ตรงกับหลอดที่ใช้:
+
+```cpp
+const float CPM_PER_USV_H = 153.8f;   // J305 / M4011
+// SBM-20 ใช้ 150.5
+const float ALARM_USV_H   = 2.5f;     // LED เตือนที่ตัวเครื่อง
+```
+
+**ค่านี้สำคัญที่สุดต่อความถูกต้อง** — ถ้าใส่ผิด ค่า µSv/h จะผิดทั้งหมด ค่าที่ให้มาเป็นค่า sensitivity สำหรับ Cs-137 จาก datasheet ถ้าต้องการความแม่นจริงควรสอบเทียบกับเครื่องมาตรฐาน
+
+### วิธีคำนวณ
+
+- **CPM** ใช้ rolling window 60 วินาที (อาเรย์ 60 ช่อง ช่องละ 1 วินาที) → ค่านิ่ง ไม่กระโดดเหมือนการนับสด และช่วง 60 วินาทีแรกจะ scale ตามจำนวนวินาทีที่เก็บได้ เพื่อให้มีตัวเลขใช้งานทันที
+- **Dose rate** = `CPM / CPM_PER_USV_H`
+- **Accumulated** = อินทิเกรตทีละวินาที `µSv += µSv/h × (Δt_ms / 3,600,000)`
+- ISR มี **debounce 190 µs** ตาม dead time ของหลอด GM เพื่อไม่ให้นับ ringing ซ้ำเป็นหลายพัลส์
+- อ่าน/เคลียร์ตัวนับด้วย `noInterrupts()` เพื่อกัน race condition กับ ISR
+
+### รูปแบบข้อมูลที่ส่งออก (ทุก 1 วินาที)
+
+```
+34.0,0.2210,0.0031
+```
+คือ `CPM,uSv_h,Accumulated_uSv` — บรรทัดที่ขึ้นต้นด้วย `#` เป็น comment/ACK ฝั่งแอปจะข้ามให้
+
+### คำสั่งที่รับจากแอป
+
+| คำสั่ง | ผล |
+|---|---|
+| `R` | รีเซ็ตค่าสะสม |
+| `Z` | รีเซ็ตค่าสะสม + ล้างหน้าต่างเฉลี่ย CPM |
+| `?` | ส่งข้อมูลรอบใหม่ทันที |
+
+### อัปโหลด
+
+1. Arduino IDE → Board: **Arduino Nano**, Processor: **ATmega328P (Old Bootloader)** ถ้าเป็นบอร์ดจีน
+2. **ถอดสาย HC-05 ออกจาก D10/D11 ก่อนอัปโหลด** ไม่งั้นอัปโหลดไม่ผ่าน (ในโค้ดนี้ใช้ SoftwareSerial จึงมักไม่ชน แต่ถอดไว้ปลอดภัยกว่า)
+3. เปิด Serial Monitor 9600 baud เพื่อดูข้อมูลชุดเดียวกับที่ส่งออกบลูทูธ
+
+### จับคู่ HC-05
+
+โมดูลมาจากโรงงานที่ baud **9600**, PIN **1234** หรือ **0000** — ถ้าอยากเปลี่ยนชื่อให้จำง่าย เข้า AT mode (กดปุ่มบนโมดูลค้างตอนจ่ายไฟ, baud 38400) แล้วสั่ง:
+
+```
+AT+NAME=TELEPOLE
+AT+PSWD=1234
+AT+UART=9600,0,0
+```
+
+---
+
+## 2. ฝั่งแอป Android (Flutter)
+
+### ติดตั้ง
+
+```bash
+cd app
+flutter create .          # สร้าง android/ ios/ ที่ยังไม่มีในโฟลเดอร์นี้
+flutter pub get
+```
+
+จากนั้น:
+
+1. เปิด `android/app/src/main/AndroidManifest.xml` แล้ววาง permission จาก `android_manifest_snippet.xml`
+2. ตั้ง `minSdkVersion 21` ใน `android/app/build.gradle`
+3. วางไฟล์เสียงเตือนที่ `app/assets/alarm.wav` (ถ้าไม่วาง แอปจะเตือนด้วยการสั่นอย่างเดียว โดยไม่ crash)
+4. `flutter run`
+
+### แพ็กเกจที่ใช้
+
+| แพ็กเกจ | หน้าที่ |
+|---|---|
+| `flutter_bluetooth_serial_ble` | Bluetooth **Classic (SPP)** — HC-05 ใช้ SPP ไม่ใช่ BLE จึงใช้ `flutter_blue_plus` ไม่ได้ |
+| `permission_handler` | ขอสิทธิ์ BLUETOOTH_CONNECT/SCAN (Android 12+) และ location (ต่ำกว่า) |
+| `fl_chart` | กราฟเส้น real-time |
+| `vibration` | สั่นเตือน |
+| `audioplayers` | เสียงเตือน |
+
+### สถาปัตยกรรม
+
+```
+ScanScreen ──เลือกอุปกรณ์──▶ TelepoleConnection (ChangeNotifier)
+                                    │  byte stream → buffer → split('\n')
+                                    │  → Reading.tryParse() → history (300 จุด)
+                                    ▼
+                            DashboardScreen ──▶ AlarmService (สั่น/เสียง)
+                                    └──────────▶ TrendChart (fl_chart)
+```
+
+จุดที่ต้องระวังและโค้ดจัดการไว้แล้ว:
+
+- **ข้อมูลมาเป็น chunk ไม่ตรงขอบบรรทัด** → เก็บ `_rxBuffer` แล้วตัดที่ `\n` เท่านั้น ท่อนท้ายที่ยังไม่จบบรรทัดเก็บไว้รอบถัดไป
+- **ข้อมูลขยะตอนเชื่อมต่อครั้งแรก** → `Reading.tryParse()` คืน `null` แทนที่จะ throw ทำให้ stream ไม่ล้ม
+- **บัฟเฟอร์บวม** ถ้าอุปกรณ์ส่งข้อมูลไม่มี newline → ตัดทิ้งเมื่อเกิน 4 KB
+- **เสียงเตือนซ้อนกัน** → `AlarmService.update()` เริ่ม/หยุดเฉพาะตอนระดับ *เปลี่ยน* เรียกทุกวินาทีได้ปลอดภัย
+
+### ระดับเตือนภัย (ปรับได้ในแอปผ่านไอคอน ⚙)
+
+| ระดับ | ค่าเริ่มต้น | UI | เสียง/สั่น |
+|---|---|---|---|
+| ปกติ | < 0.5 µSv/h | เขียว | ไม่มี |
+| เฝ้าระวัง | ≥ 0.5 µSv/h | เหลือง + แถบเตือน | สั่นทุก 2 วินาที |
+| เกินเกณฑ์ | ≥ 2.5 µSv/h | แดง ทั้งพื้นหลังและตัวเลข | สั่นเป็นจังหวะ + เสียง ทุก 0.7 วินาที |
+
+> ค่าอ้างอิง: รังสีพื้นหลังธรรมชาติทั่วไปอยู่ราว **0.05–0.20 µSv/h** ถ้าอ่านได้สูงกว่านี้มากตอนไม่มีแหล่งกำเนิด ให้สงสัยการต่อสาย/สัญญาณรบกวนก่อนสรุปว่าเจอรังสีจริง
+
+---
+
+## 3. การทดสอบโดยไม่มีหัววัด
+
+ต่อสาย jumper จาก D3 ไป D2 แล้วเพิ่มโค้ดนี้ชั่วคราวเพื่อจำลองพัลส์:
+
+```cpp
+// ใน setup(): pinMode(3, OUTPUT);
+// ใน loop(): ยิงพัลส์สุ่มประมาณ 30 CPM
+if (random(0, 1000) < 1) {
+  digitalWrite(3, HIGH); delayMicroseconds(50);
+  digitalWrite(3, LOW);  delayMicroseconds(300);
+}
+```
+
+หรือทดสอบฝั่งแอปอย่างเดียว โดยใช้แอป Bluetooth terminal บนมือถืออีกเครื่องส่งบรรทัด `120,0.780,0.0125` เข้ามา
+
+---
+
+## 4. สิ่งที่ยังไม่ได้ทำ (ถ้าจะต่อยอด)
+
+- บันทึก log ลงไฟล์ CSV / ส่งออก
+- ปักหมุดตำแหน่ง GPS พร้อมค่าที่วัดได้
+- สอบเทียบ (calibration) ในแอปแทนการ hardcode ใน firmware
+- Auto-reconnect เมื่อสัญญาณบลูทูธหลุด (ตอนนี้ต้องกลับไปหน้า Scan เอง)
+
+---
+
+## 5. หมายเหตุเรื่องแพ็กเกจบลูทูธ
+
+`flutter_bluetooth_serial_ble` เป็น fork ที่ยังดูแลอยู่ของ `flutter_bluetooth_serial` (ตัวเดิมพังกับ Gradle/AGP รุ่นใหม่เพราะไม่มี `namespace`) API เหมือนกันทุกอย่าง ถ้าจะสลับกลับไปใช้ตัวเดิม แก้แค่ 2 จุด:
+
+```yaml
+# pubspec.yaml
+flutter_bluetooth_serial: ^0.4.0
+```
+```dart
+// lib/services/telepole_connection.dart และ lib/screens/scan_screen.dart
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+```
+
+> โค้ดชุดนี้ยังไม่ได้คอมไพล์ทดสอบ เพราะเครื่องนี้ไม่มี Flutter SDK และ Arduino toolchain ติดตั้งอยู่ — กรุณารัน `flutter analyze` และ verify ด้วย Arduino IDE ก่อนใช้งานจริง
