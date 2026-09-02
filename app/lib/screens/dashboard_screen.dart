@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 
 import '../models/reading.dart';
 import '../services/alarm_service.dart';
+import '../services/session_recorder.dart';
 import '../services/telepole_connection.dart';
 import '../services/tick_service.dart';
 import '../theme.dart';
 import '../widgets/calibration_sheet.dart';
 import '../widgets/trend_chart.dart';
+import 'sessions_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final TelepoleConnection connection;
@@ -22,6 +24,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final _alarm = AlarmService();
   final _tick = TickService();
+  final _recorder = SessionRecorder();
   Thresholds _thresholds = const Thresholds();
 
   @override
@@ -30,11 +33,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _alarm.init();
     _tick.init();
     widget.connection.addListener(_onReading);
+    _recorder.addListener(_onRecorderChanged);
   }
 
   @override
   void dispose() {
     widget.connection.removeListener(_onReading);
+    _recorder.removeListener(_onRecorderChanged);
+    _recorder.dispose();
     _alarm.dispose();
     _tick.dispose();
     super.dispose();
@@ -45,6 +51,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (latest == null) return;
     _alarm.update(_thresholds.levelFor(widget.connection.doseRate));
     _tick.submit(latest.cps);
+    _recorder.add(
+      latest,
+      doseRate: widget.connection.doseRate,
+      accumulatedUSv: widget.connection.accumulatedUSv,
+    );
+  }
+
+  void _onRecorderChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// สลับสถานะบันทึก - ตอนหยุดจะสรุปให้ทันทีว่าได้อะไรไปบ้าง
+  /// เพราะภาคสนามต้องรู้เดี๋ยวนั้นว่าเก็บข้อมูลสำเร็จไหม จะได้ไม่ต้องเดินกลับไปวัดใหม่
+  Future<void> _toggleRecording() async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (_recorder.isRecording) {
+      final session = await _recorder.stop();
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            session == null
+                ? 'ไม่มีข้อมูลถูกบันทึก'
+                : 'บันทึกแล้ว ${session.sampleCount} จุด - '
+                    'สูงสุด ${session.peakCpm.toStringAsFixed(0)} CPM',
+          ),
+          action: session == null
+              ? null
+              : SnackBarAction(label: 'เปิดดู', onPressed: _openSessions),
+        ),
+      );
+      return;
+    }
+
+    final started =
+        await _recorder.start(calibration: widget.connection.calibration);
+    if (!mounted) return;
+    if (!started) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(_recorder.error ?? 'เริ่มบันทึกไม่สำเร็จ')),
+      );
+    }
+  }
+
+  Future<void> _openSessions() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SessionsScreen()),
+    );
   }
 
   Future<void> _confirmReset() async {
@@ -123,6 +179,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 onPressed: () => setState(() => _alarm.muted = !_alarm.isMuted),
               ),
               IconButton(
+                tooltip: _recorder.isRecording
+                    ? 'หยุดบันทึกการสำรวจ'
+                    : 'เริ่มบันทึกการสำรวจ',
+                icon: Icon(
+                  _recorder.isRecording
+                      ? Icons.stop_circle
+                      : Icons.fiber_manual_record,
+                  color: _recorder.isRecording
+                      ? AppTheme.danger
+                      : AppTheme.textMuted,
+                ),
+                onPressed: latest == null ? null : _toggleRecording,
+              ),
+              IconButton(
+                tooltip: 'บันทึกการสำรวจที่ผ่านมา',
+                icon: const Icon(Icons.history),
+                onPressed: _openSessions,
+              ),
+              IconButton(
                 tooltip: 'เกณฑ์เตือน & สอบเทียบ',
                 icon: const Icon(Icons.tune),
                 onPressed: _openCalibration,
@@ -152,6 +227,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     thresholds: _thresholds,
                     calibration: connection.calibration,
                   ),
+                  if (_recorder.isRecording) ...[
+                    const SizedBox(height: 12),
+                    _RecordingBar(
+                      elapsed: _recorder.elapsed,
+                      sampleCount: _recorder.sampleCount,
+                      peakCpm: _recorder.peakCpm,
+                      onStop: _toggleRecording,
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   _CpmCard(cpm: latest?.cpm, cps: latest?.cps, accent: accent),
                   const SizedBox(height: 12),
@@ -221,7 +305,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 }
 
 /// แถบเตือนว่าค่า uSv/h เป็นค่าประมาณที่ขึ้นกับการสอบเทียบ
-/// สำคัญมากสำหรับหัววัดที่ประกอบเอง เพราะไม่มีค่า sensitivity จาก datasheet
+/// ค่า datasheet ของ LND 712 ใช้เป็นค่าเริ่มต้นได้ แต่ยังไม่ใช่ค่าที่สอบเทียบแล้ว
 class _CalibrationNote extends StatelessWidget {
   final MeterCalibration calibration;
   final VoidCallback onTap;
@@ -578,6 +662,78 @@ class _MetricCard extends StatelessWidget {
             style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
           ),
           if (action != null) ...[const SizedBox(height: 8), action!],
+        ],
+      ),
+    );
+  }
+}
+
+/// แถบสถานะระหว่างบันทึก - ต้องเห็นชัดว่ากำลังบันทึกอยู่
+/// เพราะการเผลอปล่อยให้บันทึกค้างไว้ทั้งวันทำให้ไฟล์บวมและหาช่วงที่ต้องการไม่เจอ
+class _RecordingBar extends StatelessWidget {
+  final Duration elapsed;
+  final int sampleCount;
+  final double peakCpm;
+  final VoidCallback onStop;
+
+  const _RecordingBar({
+    required this.elapsed,
+    required this.sampleCount,
+    required this.peakCpm,
+    required this.onStop,
+  });
+
+  String get _elapsedLabel {
+    String two(int v) => v.toString().padLeft(2, '0');
+    final minutes = elapsed.inMinutes;
+    if (minutes >= 60) {
+      return '${elapsed.inHours}:${two(minutes % 60)}:'
+          '${two(elapsed.inSeconds % 60)}';
+    }
+    return '${two(minutes)}:${two(elapsed.inSeconds % 60)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+      decoration: BoxDecoration(
+        color: AppTheme.danger.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.danger.withOpacity(0.45)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.fiber_manual_record,
+              color: AppTheme.danger, size: 14),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'กำลังบันทึก  $_elapsedLabel',
+                  style: const TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '$sampleCount จุด - สูงสุด ${peakCpm.toStringAsFixed(0)} CPM',
+                  style:
+                      const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onStop,
+            style: TextButton.styleFrom(foregroundColor: AppTheme.danger),
+            child: const Text('หยุด'),
+          ),
         ],
       ),
     );

@@ -12,7 +12,8 @@ class CalibrationResult {
 
 /// แผงตั้งค่าเกณฑ์เตือน + สอบเทียบหลอด GM
 ///
-/// สำหรับหัววัดที่ประกอบเอง ไม่มีค่า sensitivity จาก datasheet ให้ใช้
+/// ค่าจาก datasheet (LND 712 = 108) วัดที่พลังงานอ้างอิงจุดเดียวและวัดกับหลอดใหม่
+/// ของจริงต่างไปได้ตามอายุหลอด แรงดัน HV และฝาครอบ
 /// จึงมีโหมด "สอบเทียบภาคสนาม": วางหัววัดข้างเครื่องมาตรฐาน กรอกค่าที่เครื่องนั้นอ่านได้
 /// แล้วแอปคำนวณ CPM ต่อ 1 uSv/h ให้เอง จาก CPM ที่กำลังวัดได้ในขณะนั้น
 class CalibrationSheet extends StatefulWidget {
@@ -176,7 +177,7 @@ class _CalibrationSheetState extends State<CalibrationSheet> {
               const SizedBox(height: 6),
               const Text(
                 'ค่านี้ใช้แปลง CPM เป็น uSv/h เท่านั้น — ไม่กระทบค่า CPM ที่วัดได้\n'
-                'หลอดที่ประกอบเองไม่มีค่าจาก datasheet ควรสอบเทียบกับเครื่องมาตรฐาน',
+                'ค่าจาก datasheet ใช้ได้เลย แต่ถ้าต้องการตัวเลขอ้างอิงในรายงาน ควรสอบเทียบกับเครื่องมาตรฐาน',
                 style: TextStyle(
                   color: AppTheme.textMuted,
                   fontSize: 11,

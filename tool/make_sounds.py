@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """สังเคราะห์ไฟล์เสียงของแอป: app/assets/alarm.wav และ tick.wav
 
-เสียงเป็นบี๊บคู่สั้น ๆ ความถี่ 2700 Hz ซึ่งเป็นย่านที่ลำโพงมือถือดังที่สุด
-และหูคนไวที่สุด — เลือกเพื่อให้ได้ยินในที่ที่มีเสียงรบกวน
+เสียงเตือนเป็น "หวอกวาดความถี่" (sweep/warble) 900 -> 2400 Hz สองรอบติดกัน
+เลือกแบบนี้เพราะบี๊บความถี่เดียวซ้ำ ๆ ฟังแล้วเหมือนนาฬิกาปลุกมือถือ
+ซึ่งคนมักเผลอปิดทิ้งโดยไม่คิด ส่วนเสียงกวาดความถี่เป็นสัญญาณเตือนภัย
+ที่หูแยกออกทันทีว่าไม่ใช่เสียงแจ้งเตือนทั่วไป และตัดผ่านเสียงรบกวนได้ดีกว่า
+เพราะพลังงานกระจายอยู่หลายความถี่ ไม่ตกหลุมความถี่ที่ห้องนั้นดูดกลืนพอดี
 
 AlarmService เป็นคนคุมจังหวะการเล่นซ้ำเอง (ทุก 0.7 วิ ตอนเตือนภัย)
-ไฟล์นี้จึงเก็บแค่บี๊บชุดเดียว ไม่ต้องวนลูปในตัวไฟล์
+ไฟล์นี้จึงเก็บแค่ชุดเดียว ไม่ต้องวนลูปในตัวไฟล์
 
 รัน:  python tool/make_sounds.py
 """
@@ -17,9 +20,14 @@ import wave
 from pathlib import Path
 
 SAMPLE_RATE = 44100
-FREQUENCY = 2700.0
-BEEP_MS = 90
-GAP_MS = 60
+
+# เสียงเตือน: กวาดความถี่จากต่ำขึ้นสูง ทำซ้ำเป็นชุด
+SWEEP_START_HZ = 900.0
+SWEEP_END_HZ = 2400.0
+SWEEP_MS = 170
+SWEEP_COUNT = 2
+GAP_MS = 40
+HARMONIC_MIX = 0.28  # ผสมฮาร์โมนิกที่สาม ให้เสียงมีความ "บาด" แบบไซเรน ไม่นุ่มแบบไซน์เปล่า
 FADE_MS = 5  # กันเสียง "แคร็ก" ตอนคลื่นตัดกลางคัน
 AMPLITUDE = 0.85
 
@@ -31,13 +39,23 @@ TICK_AMPLITUDE = 0.55
 TICK_DECAY = 260.0  # ยิ่งมากยิ่งดับเร็ว ทำให้ฟังเป็น "คลิก" ไม่ใช่ "ปี๊บ"
 
 
-def beep_samples() -> list[float]:
-    """หนึ่งบี๊บ พร้อม fade in/out กันเสียงแตก"""
-    total = int(SAMPLE_RATE * BEEP_MS / 1000)
+def sweep_samples() -> list[float]:
+    """หนึ่งรอบของการกวาดความถี่ พร้อม fade in/out กันเสียงแตก
+
+    ต้องสะสมเฟส (phase) ทีละแซมเปิลแทนการใส่ความถี่ลงในสูตร sin ตรง ๆ
+    เพราะถ้าความถี่เปลี่ยนแต่คูณกับเวลาที่เดินไปเรื่อย ๆ เฟสจะกระโดด
+    ได้ยินเป็นเสียงแตกเป็นช่วง ๆ แทนที่จะเป็นการกวาดที่ลื่นไหล
+    """
+    total = int(SAMPLE_RATE * SWEEP_MS / 1000)
     fade = int(SAMPLE_RATE * FADE_MS / 1000)
     out = []
+    phase = 0.0
     for i in range(total):
-        value = math.sin(2 * math.pi * FREQUENCY * i / SAMPLE_RATE)
+        progress = i / total
+        frequency = SWEEP_START_HZ + (SWEEP_END_HZ - SWEEP_START_HZ) * progress
+        phase += 2 * math.pi * frequency / SAMPLE_RATE
+        value = math.sin(phase) + HARMONIC_MIX * math.sin(3 * phase)
+        value /= 1 + HARMONIC_MIX  # ปรับกลับให้ยอดคลื่นไม่เกิน 1 หลังผสมฮาร์โมนิก
         # ค่อย ๆ ดังขึ้นตอนต้นและเบาลงตอนท้าย
         if i < fade:
             value *= i / fade
@@ -85,7 +103,12 @@ def write_wav(name: str, samples: list[float]) -> None:
 
 
 def main() -> None:
-    write_wav("alarm.wav", beep_samples() + silence_samples(GAP_MS) + beep_samples())
+    alarm = []
+    for index in range(SWEEP_COUNT):
+        if index > 0:
+            alarm += silence_samples(GAP_MS)
+        alarm += sweep_samples()
+    write_wav("alarm.wav", alarm)
     write_wav("tick.wav", tick_samples())
 
 

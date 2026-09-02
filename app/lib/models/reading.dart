@@ -54,20 +54,25 @@ class Reading {
 
 /// ค่าสอบเทียบของหลอด GM: กี่ CPM ต่อ 1 uSv/h
 ///
-/// ค่านี้ผู้ผลิตหลอดวัดมาให้ที่พลังงานอ้างอิง Cs-137 (662 keV) เพราะหลอด GM
-/// ตอบสนองต่างกันตามพลังงานโฟตอน จึงต้องมีจุดอ้างอิงจุดเดียว
+/// ค่านี้ผู้ผลิตหลอดวัดมาให้ที่พลังงานอ้างอิงจุดเดียว (Cs-137 662 keV หรือ Co-60)
+/// เพราะหลอด GM ตอบสนองต่างกันตามพลังงานโฟตอน จึงต้องมีจุดอ้างอิงจุดเดียว
 /// ค่า uSv/h ที่แสดงจึงเป็น "ค่าเทียบเท่า" ไม่ใช่ค่าสัมบูรณ์ — ส่วน CPM คือค่าจริง
 class MeterCalibration {
   final double cpmPerUSvh;
 
-  const MeterCalibration({this.cpmPerUSvh = 153.8});
+  /// ค่าตั้งต้น = LND 712 ซึ่งเป็นหลอดที่เครื่องนี้ใช้จริง
+  const MeterCalibration({this.cpmPerUSvh = defaultCpmPerUSvh});
+
+  /// LND 712: datasheet ระบุ 18 CPS ต่อ 1 mR/h (Co-60)
+  /// 18 CPS = 1080 CPM, 1 mR/h ~ 10 uSv/h  ->  108 CPM ต่อ 1 uSv/h
+  static const double defaultCpmPerUSvh = 108.0;
 
   /// ค่าที่พบบ่อยของหลอดยอดนิยม (จาก datasheet, อ้างอิง Cs-137)
   static const Map<String, double> presets = {
+    'LND 712': defaultCpmPerUSvh,
     'J305 / M4011': 153.8,
     'SBM-20': 150.5,
     'STS-5': 148.0,
-    'LND712': 108.0,
   };
 
   double doseRateFor(double cpm) => cpmPerUSvh <= 0 ? 0 : cpm / cpmPerUSvh;

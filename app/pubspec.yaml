@@ -1,5 +1,5 @@
 name: telepole_survey_meter
-description: Wireless telescopic radiation survey meter dashboard (HC-05 / Arduino Nano).
+description: Wireless telescopic radiation survey meter dashboard (HC-05 / Arduino Uno).
 publish_to: "none"
 version: 1.0.0+1
 
@@ -15,6 +15,9 @@ dependencies:
   fl_chart: ^0.68.0
   vibration: ^3.2.0
   audioplayers: ^6.8.1
+  # บันทึกการสำรวจลงไฟล์ CSV แล้วส่งออกให้คนอื่น
+  path_provider: ^2.1.5
+  share_plus: ^10.1.4
 
 dev_dependencies:
   flutter_lints: ^6.0.0

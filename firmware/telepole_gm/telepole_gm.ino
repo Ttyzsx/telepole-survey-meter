@@ -1,6 +1,7 @@
 /*
  * Telepole Radiation Survey Meter - Firmware
- * Target : Arduino Nano (ATmega328P) + HC-05 Bluetooth (SPP)
+ * Target : Arduino Uno R3 (ATmega328P) + HC-05 Bluetooth (SPP)
+ *          ชิปตัวเดียวกับ Nano ขาที่ใช้จึงเหมือนกันทุกขา คอมไพล์ด้วย board "Arduino Uno"
  *
  * - นับพัลส์จากวงจรหัววัด GM ด้วย Hardware Interrupt (INT0 = D2)
  * - คำนวณ CPM จากหน้าต่างเลื่อน (rolling window) 60 วินาที
@@ -14,8 +15,8 @@
 
 // ---------------- Configuration ----------------
 const uint8_t  PIN_GM_PULSE   = 2;    // ต้องเป็น D2 หรือ D3 เท่านั้น (INT0 / INT1)
-const uint8_t  PIN_BT_RX      = 10;   // Nano D10  <- HC-05 TXD
-const uint8_t  PIN_BT_TX      = 11;   // Nano D11  -> HC-05 RXD (ผ่าน voltage divider)
+const uint8_t  PIN_BT_RX      = 10;   // Uno D10   <- HC-05 TXD
+const uint8_t  PIN_BT_TX      = 11;   // Uno D11   -> HC-05 RXD (ผ่าน voltage divider)
 const uint8_t  PIN_BUZZER     = 8;    // บัซเซอร์/LED ติ๊กเวลาเจอพัลส์ (ตัวเลือก)
 const uint8_t  PIN_LED_ALARM  = 9;
 
@@ -26,15 +27,18 @@ const uint8_t  PIN_LED_ALARM  = 9;
 const int PULSE_EDGE = FALLING;
 
 // ค่าคงที่แปลงหน่วยของหลอด GM
-//   หลอดสำเร็จรูป (อ้างอิง Cs-137 662 keV จาก datasheet):
+//   หลอดที่เครื่องนี้ใช้จริงคือ *** LND 712 ***
+//     datasheet ระบุ gamma sensitivity 18 CPS ต่อ 1 mR/h (อ้างอิง Co-60)
+//     18 CPS = 1080 CPM  และ 1 mR/h ~ 10 uSv/h  ->  108 CPM ต่อ 1 uSv/h
+//
+//   หลอดอื่นเผื่อไว้เทียบ (อ้างอิง Cs-137 662 keV):
 //     J305 / J305beta / M4011 ~ 153.8 CPM ต่อ 1 uSv/h
 //     SBM-20                  ~ 150.5 CPM ต่อ 1 uSv/h
 //
-//   *** หลอด/หัววัดที่ประกอบเอง ไม่มีค่านี้จาก datasheet ***
-//   ค่าด้านล่างเป็นเพียงค่าตั้งต้น ต้องสอบเทียบกับเครื่องมาตรฐานเอง
+//   ค่านี้เป็นค่าตั้งต้นจาก datasheet ไม่ใช่ค่าที่สอบเทียบกับเครื่องมาตรฐานแล้ว
 //   แอปมีฟังก์ชันสอบเทียบภาคสนาม และคำนวณ uSv/h เองจาก CPM
 //   ดังนั้นไม่จำเป็นต้อง flash บอร์ดใหม่เมื่อเปลี่ยนค่าสอบเทียบ
-const float CPM_PER_USV_H = 153.8f;
+const float CPM_PER_USV_H = 108.0f;   // LND 712
 
 const unsigned long REPORT_INTERVAL_MS = 1000UL;  // ส่งข้อมูลทุก 1 วินาที
 const uint8_t  WINDOW_SECONDS = 60;               // หน้าต่างเฉลี่ยของ CPM
