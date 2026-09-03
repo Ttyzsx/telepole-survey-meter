@@ -431,7 +431,7 @@ class _TrendPanel extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.only(left: 12, bottom: 10),
             child: Text(
-              'แนวโน้ม CPM ย้อนหลัง',
+              'CPS เรียลไทม์ — พัลส์ดิบรายวินาที',
               style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
             ),
           ),
