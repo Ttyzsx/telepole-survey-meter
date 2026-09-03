@@ -26,6 +26,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _tick = TickService();
   final _recorder = SessionRecorder();
   Thresholds _thresholds = const Thresholds();
+  TrendMetric _trendMetric = TrendMetric.cps;
 
   @override
   void initState() {
@@ -293,6 +294,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     history: connection.history,
                     thresholds: _thresholds,
                     calibration: connection.calibration,
+                    metric: _trendMetric,
+                    onMetricChanged: (m) => setState(() => _trendMetric = m),
                   ),
                 ],
               ),
@@ -408,12 +411,21 @@ class _TrendPanel extends StatelessWidget {
   final List<Reading> history;
   final Thresholds thresholds;
   final MeterCalibration calibration;
+  final TrendMetric metric;
+  final ValueChanged<TrendMetric> onMetricChanged;
 
   const _TrendPanel({
     required this.history,
     required this.thresholds,
     required this.calibration,
+    required this.metric,
+    required this.onMetricChanged,
   });
+
+  static const _labels = {
+    TrendMetric.cps: 'พัลส์ดิบรายวินาที ตอบสนองทันที',
+    TrendMetric.cpm: 'ค่าเฉลี่ย 60 วินาที นิ่งแต่ตามช้า',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -428,11 +440,19 @@ class _TrendPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 12, bottom: 10),
-            child: Text(
-              'CPS เรียลไทม์ — พัลส์ดิบรายวินาที',
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+          Padding(
+            padding: const EdgeInsets.only(left: 12, bottom: 10, right: 2),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _labels[metric]!,
+                    style: const TextStyle(
+                        color: AppTheme.textMuted, fontSize: 12),
+                  ),
+                ),
+                _MetricToggle(metric: metric, onChanged: onMetricChanged),
+              ],
             ),
           ),
           Expanded(
@@ -440,6 +460,7 @@ class _TrendPanel extends StatelessWidget {
               history: history,
               thresholds: thresholds,
               calibration: calibration,
+              metric: metric,
             ),
           ),
         ],
@@ -735,6 +756,59 @@ class _RecordingBar extends StatelessWidget {
             child: const Text('หยุด'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// ปุ่มสลับค่าที่กราฟพล็อต — CPS ดิบ หรือ CPM เฉลี่ย
+///
+/// ทำเป็นปุ่มคู่ติดกันแทน dropdown เพราะมีแค่สองตัวเลือก
+/// กดครั้งเดียวถึงปลายทาง ไม่ต้องเปิดเมนูแล้วเลือก
+class _MetricToggle extends StatelessWidget {
+  final TrendMetric metric;
+  final ValueChanged<TrendMetric> onChanged;
+
+  const _MetricToggle({required this.metric, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceAlt,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: AppTheme.outline),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _seg('CPS', TrendMetric.cps),
+          _seg('CPM', TrendMetric.cpm),
+        ],
+      ),
+    );
+  }
+
+  Widget _seg(String label, TrendMetric value) {
+    final selected = metric == value;
+    return GestureDetector(
+      onTap: selected ? null : () => onChanged(value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.safe : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? AppTheme.bg : AppTheme.textMuted,
+          ),
+        ),
       ),
     );
   }

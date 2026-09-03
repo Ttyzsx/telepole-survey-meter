@@ -4,38 +4,56 @@ import 'package:flutter/material.dart';
 import '../models/reading.dart';
 import '../theme.dart';
 
-/// กราฟเส้นแนวโน้มแบบเรียลไทม์ — พล็อต CPS ไม่ใช่ CPM
+/// ค่าที่กราฟจะพล็อต — สลับได้จากปุ่มบนหัวการ์ด
 ///
-/// เลือก CPS เพราะกราฟนี้มีไว้ "หาจุดร้อน" ไม่ใช่ "อ่านค่าที่แม่น"
-/// CPM เป็นค่าเฉลี่ย 60 วินาที เอาหัววัดจ่อแหล่งรังสีแล้วกราฟจะไต่ขึ้นเป็นนาที
-/// ส่วน CPS คือพัลส์ดิบของวินาทีนั้น ขยับตามทันทีที่ค่าเปลี่ยน
+/// ทั้งสองค่ามาจากพัลส์ชุดเดียวกัน ต่างกันแค่ช่วงเวลาที่เฉลี่ย
+/// จึงเหมาะกับงานคนละแบบ ไม่มีอันไหนถูกกว่ากัน
+enum TrendMetric {
+  /// พัลส์ดิบของวินาทีที่เพิ่งผ่าน ไม่ผ่านการเฉลี่ย
+  /// ขยับทันทีที่ค่าเปลี่ยน เหมาะกับการกวาดหาจุดร้อน แลกกับกราฟหยึกหยัก
+  cps,
+
+  /// ค่าเฉลี่ยจากหน้าต่างเลื่อน 60 วินาทีที่ firmware คำนวณมาให้
+  /// นิ่งกว่ามาก เหมาะกับการอ่านค่า แลกกับการตอบสนองช้าถึงหนึ่งนาที
+  cpm,
+}
+
+/// กราฟเส้นแนวโน้มแบบเรียลไทม์
 ///
-/// ราคาที่จ่ายคือกราฟหยึกหยัก เพราะการสลายตัวเป็นเหตุการณ์สุ่มแบบปัวซง
-/// ที่รังสีพื้นหลังจะเห็นเด้ง 0-1-2 ตลอดเวลาโดยที่รังสีไม่ได้เปลี่ยน
-/// ตัวเลข CPM ที่นิ่งกว่ายังแสดงเป็นตัวใหญ่อยู่ด้านบนของหน้าจอ
-///
-/// แกน X = วินาทีย้อนหลัง (0 คือค่าล่าสุด) · แกน Y = CPS
-/// เส้นประคือเกณฑ์เตือน ซึ่งกำหนดเป็น uSv/h จึงต้องแปลงเป็น CPS ก่อนวาง
+/// แกน X = วินาทีย้อนหลัง (0 คือค่าล่าสุด) · แกน Y ขึ้นกับโหมดที่เลือก
+/// เส้นประคือเกณฑ์เตือน ซึ่งกำหนดเป็น uSv/h จึงต้องแปลงให้ตรงหน่วยก่อนวาง
 class TrendChart extends StatelessWidget {
   final List<Reading> history;
   final Thresholds thresholds;
   final MeterCalibration calibration;
+  final TrendMetric metric;
 
-  /// ยอดแกน Y ขั้นต่ำ กันไม่ให้กราฟดูโอเวอร์ตอนค่าต่ำ ๆ
+  /// ยอดแกน Y ขั้นต่ำของแต่ละโหมด กันไม่ให้กราฟดูโอเวอร์ตอนค่าต่ำ ๆ
   /// ที่รังสีพื้นหลัง CPS อยู่ราว 0-1 ถ้าปล่อยให้ scale ตามค่าจริง
   /// การเด้งจาก 0 เป็น 1 จะเต็มจอทั้งที่ไม่มีอะไรเกิดขึ้น
-  static const double minTopCps = 4;
+  static const double _minTopCps = 4;
+  static const double _minTopCpm = 40;
 
   const TrendChart({
     super.key,
     required this.history,
     required this.thresholds,
     required this.calibration,
+    this.metric = TrendMetric.cps,
   });
 
+  bool get _isCps => metric == TrendMetric.cps;
+
   /// firmware รุ่นเก่าส่งมาแค่ 3 ช่อง ไม่มี CPS — ประมาณจาก CPM แทน
-  /// กราฟจะนิ่งเหมือนเดิม แต่ยังใช้งานได้ ไม่ใช่จอเปล่า
-  static double _cpsOf(Reading r) => (r.cps ?? (r.cpm / 60.0)).toDouble();
+  /// กราฟจะนิ่งเหมือนโหมด CPM แต่ยังใช้งานได้ ไม่ใช่จอเปล่า
+  double _valueOf(Reading r) =>
+      _isCps ? (r.cps ?? (r.cpm / 60.0)).toDouble() : r.cpm;
+
+  /// เกณฑ์เตือนเก็บเป็น uSv/h แปลงเป็น CPM ก่อน แล้วหาร 60 ถ้าอยู่โหมด CPS
+  double _thresholdFor(double doseRate) {
+    final cpm = calibration.cpmFor(doseRate);
+    return _isCps ? cpm / 60.0 : cpm;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,20 +69,20 @@ class TrendChart extends StatelessWidget {
     final spots = <FlSpot>[];
     final last = history.length - 1;
     for (var i = 0; i < history.length; i++) {
-      spots.add(FlSpot((i - last).toDouble(), _cpsOf(history[i])));
+      spots.add(FlSpot((i - last).toDouble(), _valueOf(history[i])));
     }
 
-    // เกณฑ์เตือนเก็บเป็น uSv/h -> แปลงเป็น CPM -> หาร 60 ได้ CPS
-    final elevatedCps = calibration.cpmFor(thresholds.elevated) / 60.0;
-    final alarmCps = calibration.cpmFor(thresholds.alarm) / 60.0;
+    final elevatedLine = _thresholdFor(thresholds.elevated);
+    final alarmLine = _thresholdFor(thresholds.alarm);
 
-    final peak = history.map(_cpsOf).reduce((a, b) => a > b ? a : b);
+    final peak = history.map(_valueOf).reduce((a, b) => a > b ? a : b);
     // ให้เส้นเกณฑ์เตือนอยู่ในกรอบเสมอ เพื่ออ่านระยะห่างจากเกณฑ์ได้
-    var top = (peak > alarmCps ? peak : alarmCps) * 1.25;
-    if (top < minTopCps) top = minTopCps;
+    var top = (peak > alarmLine ? peak : alarmLine) * 1.25;
+    final floor = _isCps ? _minTopCps : _minTopCpm;
+    if (top < floor) top = floor;
 
-    // สีเส้นยังอิงระดับจาก CPM ที่เฉลี่ยแล้ว ไม่ใช่ CPS ดิบ
-    // ไม่งั้นเส้นจะกะพริบเปลี่ยนสีทุกวินาทีตามความสุ่ม
+    // สีเส้นอิงระดับจาก CPM ที่เฉลี่ยแล้วเสมอ แม้อยู่โหมด CPS
+    // ไม่งั้นเส้นจะกะพริบเปลี่ยนสีทุกวินาทีตามความสุ่มของการนับ
     final level = thresholds.levelFor(calibration.doseRateFor(history.last.cpm));
     final lineColor = AppTheme.colorFor(level);
 
@@ -89,7 +107,7 @@ class TrendChart extends StatelessWidget {
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              reservedSize: 34,
+              reservedSize: _isCps ? 34 : 42,
               getTitlesWidget: (value, meta) => Text(
                 value.toStringAsFixed(0),
                 style: const TextStyle(color: AppTheme.textMuted, fontSize: 10),
@@ -112,13 +130,13 @@ class TrendChart extends StatelessWidget {
         extraLinesData: ExtraLinesData(
           horizontalLines: [
             HorizontalLine(
-              y: elevatedCps,
+              y: elevatedLine,
               color: AppTheme.warn.withOpacity(0.7),
               strokeWidth: 1,
               dashArray: const [6, 4],
             ),
             HorizontalLine(
-              y: alarmCps,
+              y: alarmLine,
               color: AppTheme.danger.withOpacity(0.8),
               strokeWidth: 1,
               dashArray: const [6, 4],
@@ -130,8 +148,11 @@ class TrendChart extends StatelessWidget {
             getTooltipItems: (touched) => touched
                 .map(
                   (s) => LineTooltipItem(
-                    '${s.y.toStringAsFixed(0)} CPS\n'
-                    '= ${(s.y * 60).toStringAsFixed(0)} CPM',
+                    _isCps
+                        ? '${s.y.toStringAsFixed(0)} CPS\n'
+                            '= ${(s.y * 60).toStringAsFixed(0)} CPM'
+                        : '${s.y.toStringAsFixed(0)} CPM\n'
+                            '${calibration.doseRateFor(s.y).toStringAsFixed(3)} uSv/h',
                     const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
                   ),
                 )
@@ -141,10 +162,12 @@ class TrendChart extends StatelessWidget {
         lineBarsData: [
           LineChartBarData(
             spots: spots,
-            // ไม่ทำเส้นโค้ง เพราะ CPS เป็นจำนวนเต็มที่กระโดด
+            // โหมด CPS ไม่ทำเส้นโค้ง เพราะเป็นจำนวนเต็มที่กระโดด
             // การ smooth จะสร้างค่าที่ไม่เคยวัดได้จริงระหว่างจุด และอาจลากต่ำกว่าศูนย์
-            isCurved: false,
-            barWidth: 2,
+            // ส่วน CPM ผ่านการเฉลี่ยมาแล้ว เส้นโค้งเบา ๆ จึงไม่บิดเบือนอะไร
+            isCurved: !_isCps,
+            curveSmoothness: 0.2,
+            barWidth: _isCps ? 2 : 2.5,
             color: lineColor,
             dotData: const FlDotData(show: false),
             belowBarData: BarAreaData(
@@ -158,7 +181,7 @@ class TrendChart extends StatelessWidget {
           ),
         ],
       ),
-      duration: const Duration(milliseconds: 150),
+      duration: Duration(milliseconds: _isCps ? 150 : 250),
     );
   }
 }
