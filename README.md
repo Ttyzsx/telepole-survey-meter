@@ -125,7 +125,7 @@ LND 712 เป็นหลอดหน้าต่างไมกาบาง (1
 
 ### อัปโหลด
 
-1. Arduino IDE → Board: **Arduino Nano**, Processor: **ATmega328P (Old Bootloader)** ถ้าเป็นบอร์ดจีน
+1. Arduino IDE → Board: **Arduino Uno** (ไม่ต้องเลือก Processor เหมือน Nano — Uno มีตัวเลือกเดียว)
 2. **ถอดสาย HC-05 ออกจาก D10/D11 ก่อนอัปโหลด** ไม่งั้นอัปโหลดไม่ผ่าน (ในโค้ดนี้ใช้ SoftwareSerial จึงมักไม่ชน แต่ถอดไว้ปลอดภัยกว่า)
 3. เปิด Serial Monitor 9600 baud เพื่อดูข้อมูลชุดเดียวกับที่ส่งออกบลูทูธ
 
