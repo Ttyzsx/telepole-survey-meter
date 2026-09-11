@@ -1,4 +1,18 @@
 /*
+ * *** เวอร์ชันเก่า เก็บไว้อ้างอิงเท่านั้น ไม่ใช่ตัวที่แฟลชลงเครื่องจริง ***
+ *
+ * ตัวที่ใช้จริงคือ firmware/telepole_gm/
+ * ไฟล์นี้คือสภาพก่อนแก้ผังขาให้ตรงกับคู่มือ (commit 4fd3853) ต่างกันตรงนี้:
+ *   HC-05      D10/D11   ->  D7/D8   (ตามคู่มือ ซึ่งตรงกับสายที่เดินไว้จริง)
+ *   บัซเซอร์    D8        ->  D6      (D8 เดิมชนกับขา RXD ของ HC-05)
+ *   LED เตือน   D9        ->  ตัดออก  (คู่มือไม่มี)
+ *   ขอบพัลส์    FALLING   ->  RISING  (ตามคู่มือ)
+ *   ขา D2      INPUT_PULLUP -> INPUT  (CD4093 ขับขาให้อยู่แล้ว)
+ *
+ * เก็บไว้เผื่อวันหนึ่งต้องย้าย HC-05 ออกจาก D7/D8 แล้วอยากได้ผังขาเดิมคืน
+ */
+
+/*
  * Telepole Radiation Survey Meter - Firmware
  * Target : Arduino Uno R3 (ATmega328P) + HC-05 Bluetooth (SPP)
  *          ชิปตัวเดียวกับ Nano ขาที่ใช้จึงเหมือนกันทุกขา คอมไพล์ด้วย board "Arduino Uno"
@@ -10,26 +24,22 @@
  * - ส่ง CSV ออก HC-05 ทุก 1 วินาที : "CPM,uSv_h,Accumulated_uSv,CPS\n"
  *   ช่อง CPS = พัลส์ดิบของวินาทีนั้น ไม่ผ่านการเฉลี่ย แอปใช้ขับกราฟเรียลไทม์และเสียงคลิก
  * - รับคำสั่งจากแอป : 'R' = reset ค่าสะสม, 'Z' = reset ทั้งหมด, '?' = ส่งข้อมูลทันที
- *
- * ผังขายึดตามคู่มือของอาจารย์ : พัลส์ D2 · บัซเซอร์ D6 · HC-05 ที่ D7(RX)/D8(TX)
- * ปุ่มเมนู D3/D4/D5 ของคู่มือไม่ได้ใช้แล้ว เพราะย้ายไปปรับค่าในแอป
  */
 
 #include <SoftwareSerial.h>
 
 // ---------------- Configuration ----------------
 const uint8_t  PIN_GM_PULSE   = 2;    // ต้องเป็น D2 หรือ D3 เท่านั้น (INT0 / INT1)
-// ผังขาตามคู่มือของอาจารย์ (หน้า 4) — D3/D4/D5 เป็นปุ่มเมนูของคู่มือ
-// ซึ่งเลิกใช้แล้วเพราะย้ายไปปรับค่าในแอป ไฟล์นี้จึงไม่แตะสามขานั้น
-const uint8_t  PIN_BT_RX      = 7;    // Uno D7    <- HC-05 TXD
-const uint8_t  PIN_BT_TX      = 8;    // Uno D8    -> HC-05 RXD (ผ่าน voltage divider)
-const uint8_t  PIN_BUZZER     = 6;    // บัซเซอร์เตือนเมื่อเกินเกณฑ์ (ตามคู่มือ)
+const uint8_t  PIN_BT_RX      = 10;   // Uno D10   <- HC-05 TXD
+const uint8_t  PIN_BT_TX      = 11;   // Uno D11   -> HC-05 RXD (ผ่าน voltage divider)
+const uint8_t  PIN_BUZZER     = 8;    // บัซเซอร์/LED ติ๊กเวลาเจอพัลส์ (ตัวเลือก)
+const uint8_t  PIN_LED_ALARM  = 9;
 
 // ขอบสัญญาณที่ใช้ trigger — ขึ้นกับวงจร interface ของหัววัด
-//   RISING  = พัลส์ active-high  <- คู่มือใช้ค่านี้ และรันกับบอร์ดจริงมาแล้ว
-//   FALLING = พัลส์ active-low (ถ้าวัด CN1 แล้วขาสัญญาณนิ่งที่ 5V ค่อยเปลี่ยนมาใช้)
-// บอร์ดหัววัดมี CD4093 จัดรูปพัลส์ให้แล้ว ขาออกจึงถูกขับเป็นลอจิก ไม่ต้องใช้ pull-up
-const int PULSE_EDGE = RISING;
+//   FALLING = พัลส์ active-low (transistor/optocoupler ดึงลง GND) ใช้กับ INPUT_PULLUP
+//   RISING  = พัลส์ active-high
+// ถ้าตั้งผิดขอบ จะยังนับได้แต่ค่าอาจเพี้ยนหรือนับไม่ครบ ควรยืนยันด้วยออสซิลโลสโคป
+const int PULSE_EDGE = FALLING;
 
 // ค่าคงที่แปลงหน่วยของหลอด GM
 //   หลอดที่เครื่องนี้ใช้จริงคือ *** LND 712 ***
@@ -49,7 +59,6 @@ const unsigned long REPORT_INTERVAL_MS = 1000UL;  // ส่งข้อมูล
 const uint8_t  WINDOW_SECONDS = 60;               // หน้าต่างเฉลี่ยของ CPM
 const unsigned long DEBOUNCE_US = 190UL;          // dead time ของหลอด GM (~190us)
 const float ALARM_USV_H = 2.5f;                   // เกณฑ์เตือนที่ตัวเครื่อง
-const unsigned long ALARM_TONE_MS = 500UL;        // เสียงเตือนดังครั้งละ 0.5 วินาที (ตามคู่มือ)
 
 // ---------------- State ----------------
 SoftwareSerial bt(PIN_BT_RX, PIN_BT_TX);
@@ -64,7 +73,7 @@ unsigned long windowSum = 0;                // ผลรวมพัลส์ใ
 
 float accumulatedUSv = 0.0f;                // ปริมาณรังสีสะสมตั้งแต่เปิดเครื่อง
 unsigned long lastReportMs = 0;
-bool alarmActive = false;                   // กันไม่ให้เสียงเตือนย้ำทุกวินาที
+unsigned long tickOffMs = 0;                // เวลาปิดเสียงติ๊ก
 
 // ---------------- ISR ----------------
 // ยิงเมื่อสัญญาณจากวงจร GM ตกลง (active-low pulse จาก transistor/optocoupler)
@@ -77,9 +86,11 @@ void onGeigerPulse() {
 
 // ---------------- Setup ----------------
 void setup() {
-  pinMode(PIN_GM_PULSE, INPUT);     // คู่มือใช้ INPUT เฉย ๆ วงจร CD4093 ขับขาให้อยู่แล้ว
+  pinMode(PIN_GM_PULSE, INPUT_PULLUP);
   pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(PIN_LED_ALARM, OUTPUT);
   digitalWrite(PIN_BUZZER, LOW);
+  digitalWrite(PIN_LED_ALARM, LOW);
 
   for (uint8_t i = 0; i < WINDOW_SECONDS; i++) window[i] = 0;
 
@@ -156,6 +167,12 @@ void report(float cpm, float uSvH, uint16_t countsThisSecond) {
 void loop() {
   handleCommand();
 
+  // ปิดเสียงติ๊กหลังผ่านไป 2 ms
+  if (tickOffMs && millis() >= tickOffMs) {
+    digitalWrite(PIN_BUZZER, LOW);
+    tickOffMs = 0;
+  }
+
   unsigned long now = millis();
   if (now - lastReportMs < REPORT_INTERVAL_MS) return;
 
@@ -174,15 +191,11 @@ void loop() {
   // อินทิเกรตปริมาณสะสม: uSv/h * (ms / 3,600,000) = uSv
   accumulatedUSv += uSvH * ((float)elapsedMs / 3600000.0f);
 
-  // เสียงเตือนที่ตัวเครื่องเมื่อเกินเกณฑ์ — ร้องครั้งเดียวตอนข้ามเกณฑ์ ไม่ย้ำทุกวินาที
-  // (เสียงคลิกรายพัลส์ทำฝั่งแอป ปรับความดังและปิดได้ จึงไม่ทำซ้ำที่นี่)
-  if (uSvH >= ALARM_USV_H) {
-    if (!alarmActive) {
-      alarmActive = true;
-      tone(PIN_BUZZER, 2000, ALARM_TONE_MS);
-    }
-  } else {
-    alarmActive = false;
+  // สัญญาณเตือนที่ตัวเครื่อง
+  digitalWrite(PIN_LED_ALARM, uSvH >= ALARM_USV_H ? HIGH : LOW);
+  if (counts > 0) {                       // ติ๊กเมื่อมีพัลส์ในวินาทีนั้น
+    digitalWrite(PIN_BUZZER, HIGH);
+    tickOffMs = now + 2;
   }
 
   report(cpm, uSvH, (uint16_t)counts);
