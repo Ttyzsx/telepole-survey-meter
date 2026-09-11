@@ -20,3 +20,10 @@ app/web/
 *.iml
 .DS_Store
 Thumbs.db
+
+# APK ที่ CI สร้างใหม่ได้ทุก push ไม่ต้องถ่วง repo
+dist/
+
+# ไฟล์สำรองและไฟล์ล็อกชั่วคราว
+*.ino.bak
+~$*
