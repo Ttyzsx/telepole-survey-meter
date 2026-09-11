@@ -30,17 +30,25 @@
  * -------------------------------------------------------------------------
  */
 
+// ---------- [ทดสอบ RAM] สวิตช์เปิด/ปิด Bluetooth ----------
+// 0 = ตัด SoftwareSerial ออก ประหยัดแรมประมาณ 117 ไบต์
+// 1 = เปิดใช้ Bluetooth ตามปกติ (ทำได้เมื่อย้ายไปใช้ U8g2 page buffer แล้ว)
+#define ENABLE_BLUETOOTH 0
+
 #include <Wire.h>
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_GFX.h>
+#if ENABLE_BLUETOOTH
 #include <SoftwareSerial.h>
+#endif
 
 // ---------- ตั้งค่าหน้าจอ OLED ----------
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_ADDR 0x3C   // I2C address ของจอ SSD1306
-
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+
 
 // ---------- กำหนดขาต่ออุปกรณ์ ----------
 #define GEIGER_PIN 2    // ขาสัญญาณ Pulse จากโมดูล HV (interrupt 0)
@@ -51,7 +59,9 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define BT_RX 7         // ขา RX ของ Arduino (ต่อกับ TX ของ HC-05)
 #define BT_TX 8         // ขา TX ของ Arduino (ต่อกับ RX ของ HC-05)
 
+#if ENABLE_BLUETOOTH
 SoftwareSerial bluetooth(BT_RX, BT_TX);   // RX, TX
+#endif
 
 // ---------- ค่าคงที่หลัก ----------
 const unsigned long SAMPLE_TIME = 10000;              // เก็บตัวอย่างทุก 10 วินาที (ms)
@@ -82,6 +92,16 @@ const unsigned long debounceDelay = 200;   // กันการกระเด�
 bool alertActive = false;
 unsigned long lastAlertTime = 0;
 const unsigned long alertDuration = 500;   // เสียงดัง 0.5 วินาที
+
+// -------------------------------------------------------------
+// [ทดสอบ RAM] คืนค่าจำนวนไบต์ว่างระหว่าง heap กับ stack ณ ขณะนั้น
+// ใช้ดูว่าเหลือพอให้ display.begin() ขอ framebuffer 1024 ไบต์หรือไม่
+// -------------------------------------------------------------
+int freeRam() {
+  extern int __heap_start, *__brkval;
+  int v;
+  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
+}
 
 // -------------------------------------------------------------
 // ฟังก์ชัน Interrupt: ทำงานทุกครั้งที่เกิดพัลส์จากหลอดไกเกอร์
@@ -124,29 +144,29 @@ void updateDisplay() {
   display.setCursor(0, 0);
 
   // แสดง CPM และ Dose Rate
-  display.print("CPM: ");
+  display.print(F("CPM: "));
   display.println(cpm, 0);
-  display.print("Dose: ");
+  display.print(F("Dose: "));
   display.print(doseRate, 2);
-  display.println(" uSv/h");
+  display.println(F(" uSv/h"));
 
   // แสดงค่า Alert Threshold และ Conversion Factor
-  display.print("Alert: ");
+  display.print(F("Alert: "));
   display.print(alertThreshold, 2);
-  display.print(" uSv/h");
+  display.print(F(" uSv/h"));
 
   display.setCursor(0, 40);
-  display.print("Conv: ");
+  display.print(F("Conv: "));
   display.print(convFactor, 5);
 
   // หากกำลังอยู่ในโหมดเมนู ให้แสดงข้อความแจ้ง
   if (menuMode != 0) {
     display.setCursor(0, 52);
-    display.print("Menu Mode: ");
+    display.print(F("Menu Mode: "));
     switch (menuMode) {
-      case 1: display.print("Conv Factor"); break;
-      case 2: display.print("Background");  break;
-      case 3: display.print("Alert Thresh"); break;
+      case 1: display.print(F("Conv Factor")); break;
+      case 2: display.print(F("Background"));  break;
+      case 3: display.print(F("Alert Thresh")); break;
     }
   }
 
@@ -158,9 +178,11 @@ void updateDisplay() {
 // รูปแบบ: cpm=123.45;uSv/h=1.03
 // -------------------------------------------------------------
 void sendBluetoothData() {
+#if ENABLE_BLUETOOTH
   char buffer[50];
   snprintf(buffer, sizeof(buffer), "cpm=%.0f;uSv/h=%.2f\n", cpm, doseRate);
   bluetooth.print(buffer);
+#endif
 }
 
 // -------------------------------------------------------------
@@ -193,13 +215,23 @@ void handleMenu() {
 // -------------------------------------------------------------
 void setup() {
   Serial.begin(9600);       // Serial Monitor สำหรับดีบัก
+#if ENABLE_BLUETOOTH
   bluetooth.begin(9600);    // เริ่มการทำงาน Bluetooth (HC-05 ปกติใช้ 9600 baud)
+#endif
+
+  // [ทดสอบ RAM] ต้องเหลืออย่างน้อย 1024 + 128 = 1152 ไบต์ จอถึงจะเริ่มได้
+  Serial.print(F("Free RAM before begin: "));
+  Serial.println(freeRam());
 
   // เริ่มต้นจอ OLED
-  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+  if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println(F("SSD1306 allocation failed"));
+    Serial.print(F("Free RAM at failure: "));
+    Serial.println(freeRam());
     for (;;);   // หยุดทำงานหากจอแสดงผลไม่เริ่ม
   }
+  Serial.print(F("Display OK. Free RAM after begin: "));
+  Serial.println(freeRam());
   display.clearDisplay();
   display.display();
   delay(1000);
@@ -219,8 +251,8 @@ void setup() {
   display.setTextSize(1);                  // [เพิ่มจากคู่มือ] ดูหมายเหตุ [2]
   display.setTextColor(SSD1306_WHITE);     // [เพิ่มจากคู่มือ] ดูหมายเหตุ [2]
   display.setCursor(0, 0);
-  display.println("Geiger Counter");
-  display.println("LND712 Ready");
+  display.println(F("Geiger Counter"));
+  display.println(F("LND712 Ready"));
   display.display();
   delay(2000);
 
