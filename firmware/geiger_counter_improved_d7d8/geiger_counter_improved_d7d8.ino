@@ -198,37 +198,46 @@ void triggerAlert() {
 // ด้วย clearToEOL() แทนการ clear() ทั้งจอ ไม่งั้นจอจะกะพริบทุกครั้งที่อัปเดต
 // -------------------------------------------------------------
 void updateDisplay() {
+  // จอ 128x64 กับฟอนต์ System5x7 ได้ 8 แถว ของเดิมใช้แถว 0,1,2,4,6
+  // เว้นแถว 3 กับ 5 ทิ้งเป็นช่องว่างกลางจอ แล้วยังเหลือแถว 7 ไม่ได้ใช้
+  // เรียงใหม่ให้ติดกันตั้งแต่แถว 0 จะได้ที่ว่างพอใส่ค่า Background
+  // ซึ่งเดิมปรับได้ในเมนูแต่ไม่เคยโผล่บนจอ กดปรับแล้วไม่เห็นอะไรขยับ
+  //
+  // เครื่องหมาย '>' หน้าบรรทัดชี้ว่ากำลังแก้ค่าไหนอยู่ ทำให้ไม่ต้องมี
+  // บรรทัดบอกชื่อเมนูแยกอีกบรรทัด ประหยัดพื้นที่และอ่านง่ายกว่า
+
   oled.setCursor(0, 0);
-  oled.print(F("CPM: "));
+  oled.print(F("CPM  "));
   oled.print(cpm, 0);
   oled.clearToEOL();
 
   oled.setCursor(0, 1);
-  oled.print(F("Dose: "));
+  oled.print(F("Dose "));
   oled.print(doseRate, 2);
   oled.print(F(" uSv/h"));
   oled.clearToEOL();
 
-  oled.setCursor(0, 2);
-  oled.print(F("Alert: "));
-  oled.print(alertThreshold, 2);
-  oled.print(F(" uSv/h"));
-  oled.clearToEOL();
+  // สามบรรทัดนี้คือค่าที่ปรับได้ เรียงตามลำดับเมนู 1-2-3
+  printSetting(2, 1, F("Conv "), convFactor, 5, NULL);
+  printSetting(3, 2, F("Bkg  "), background, 0, F(" CPM"));
+  printSetting(4, 3, F("Alrt "), alertThreshold, 2, F(" uSv/h"));
 
-  oled.setCursor(0, 4);
-  oled.print(F("Conv: "));
-  oled.print(convFactor, 5);
-  oled.clearToEOL();
-
-  oled.setCursor(0, 6);
+  oled.setCursor(0, 5);
   if (menuMode != 0) {
-    oled.print(F("Menu: "));
-    switch (menuMode) {
-      case 1: oled.print(F("Conv Factor"));  break;
-      case 2: oled.print(F("Background"));   break;
-      case 3: oled.print(F("Alert Thresh")); break;
-    }
+    oled.print(F("UP/DN adj   SEL next"));
   }
+  oled.clearToEOL();
+}
+
+// วาดหนึ่งบรรทัดของค่าที่ปรับได้ พร้อมเครื่องหมายชี้ว่ากำลังแก้ค่านี้อยู่
+// รวมไว้ที่เดียวกันเพื่อให้ทั้งสามบรรทัดเรียงคอลัมน์ตรงกันเสมอ
+void printSetting(uint8_t row, int ownerMode, const __FlashStringHelper *label,
+                  float value, uint8_t decimals, const __FlashStringHelper *unit) {
+  oled.setCursor(0, row);
+  oled.print(menuMode == ownerMode ? '>' : ' ');
+  oled.print(label);
+  oled.print(value, decimals);
+  if (unit) oled.print(unit);
   oled.clearToEOL();
 }
 
