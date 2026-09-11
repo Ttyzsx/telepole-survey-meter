@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/reading.dart';
 import '../services/alarm_service.dart';
 import '../services/session_recorder.dart';
+import '../services/settings_store.dart';
 import '../services/telepole_connection.dart';
 import '../services/tick_service.dart';
 import '../theme.dart';
@@ -25,6 +26,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _alarm = AlarmService();
   final _tick = TickService();
   final _recorder = SessionRecorder();
+  final _settings = SettingsStore();
   Thresholds _thresholds = const Thresholds();
   TrendMetric _trendMetric = TrendMetric.cps;
 
@@ -35,6 +37,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _tick.init();
     widget.connection.addListener(_onReading);
     _recorder.addListener(_onRecorderChanged);
+    _restoreSettings();
+  }
+
+  /// โหลดค่าที่ตั้งไว้ครั้งก่อนกลับมา เรียกแบบไม่รอผลเพราะหน้าจอแสดงค่าเริ่มต้น
+  /// ไปก่อนได้ พอโหลดเสร็จค่อยทับด้วยค่าจริง ใช้เวลาไม่ถึงเสี้ยววินาที
+  Future<void> _restoreSettings() async {
+    final stored = await _settings.load();
+    if (!mounted) return;
+    setState(() => _thresholds = stored.thresholds);
+    widget.connection.setCalibration(stored.calibration);
   }
 
   @override
@@ -145,6 +157,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (result == null || !mounted) return;
     setState(() => _thresholds = result.thresholds);
     widget.connection.setCalibration(result.calibration);
+    await _settings.save(
+      calibration: result.calibration,
+      thresholds: result.thresholds,
+    );
   }
 
   @override
