@@ -232,7 +232,8 @@ class TelepoleConnection extends ChangeNotifier {
 
     final deltaMs = reading.timestamp.difference(previous).inMilliseconds;
     // ข้ามช่วงที่ผิดปกติ (สัญญาณหลุดไปนานแล้วกลับมา) ไม่งั้นค่าสะสมจะพุ่งผิด
-    if (deltaMs <= 0 || deltaMs > 10000) return;
+    // เพดาน 30 วิ เพราะ gm_final ส่งทุก 10 วิ ถ้าตั้ง 10 วิพอดี รอบที่ช้าไปนิดเดียวจะถูกทิ้ง
+    if (deltaMs <= 0 || deltaMs > 30000) return;
 
     _accumulatedUSv +=
         _calibration.doseRateFor(reading.cpm) * (deltaMs / 3600000.0);

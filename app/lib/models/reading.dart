@@ -31,6 +31,8 @@ class Reading {
     final trimmed = line.trim();
     if (trimmed.isEmpty || trimmed.startsWith('#')) return null;
 
+    if (trimmed.contains('=')) return _tryParseKeyValue(trimmed);
+
     final parts = trimmed.split(',');
     if (parts.length < 3) return null;
 
@@ -47,6 +49,30 @@ class Reading {
       deviceDoseRate: rate,
       deviceAccumulated: dose,
       cps: cps != null && cps >= 0 ? cps : null,
+      timestamp: DateTime.now(),
+    );
+  }
+
+  /// รูปแบบ "cpm=123;uSv/h=1.230" ของสเก็ตช์ gm_final (ส่งทุก 10 วินาที)
+  /// ต้องมี cpm เสมอ ส่วน uSv/h เป็นช่องเสริม และไม่มีค่าสะสมหรือ CPS มาด้วย
+  /// หมายเหตุ: uSv/h ของบอร์ดหัก background ไปแล้ว แต่ cpm ที่ส่งมาเป็นค่าดิบ
+  static Reading? _tryParseKeyValue(String line) {
+    final fields = <String, String>{};
+    for (final pair in line.split(';')) {
+      final eq = pair.indexOf('=');
+      if (eq <= 0) continue;
+      fields[pair.substring(0, eq).trim().toLowerCase()] =
+          pair.substring(eq + 1).trim();
+    }
+
+    final cpm = double.tryParse(fields['cpm'] ?? '');
+    if (cpm == null || cpm < 0) return null;
+    final rate = double.tryParse(fields['usv/h'] ?? '');
+
+    return Reading(
+      cpm: cpm,
+      deviceDoseRate: rate != null && rate >= 0 ? rate : 0,
+      deviceAccumulated: 0,
       timestamp: DateTime.now(),
     );
   }
