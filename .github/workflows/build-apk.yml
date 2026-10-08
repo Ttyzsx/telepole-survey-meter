@@ -1,19 +1,18 @@
-name: Build APK
+name: Build apps
 
 on:
   push:
-    branches: [main]
+    # branch ที่ขึ้นต้นด้วย ci/ ใช้ลอง build โดยไม่ออก Release
+    branches: [main, "ci/**"]
     paths-ignore:
       - "**.md"
       - "firmware/**"
   workflow_dispatch:
 
 jobs:
-  build:
+  android:
     name: Build Android APK
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -71,13 +70,91 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      # สร้าง Release เพื่อให้ได้ลิงก์ .apk ตรง ๆ กดติดตั้งจากมือถือได้เลย
-      # ไม่ต้องแตกไฟล์ zip แบบ artifact
+  ios:
+    name: Build iOS IPA (unsigned)
+    # Xcode มีแต่บน macOS — runner นี้ใช้ฟรีสำหรับ repo สาธารณะ
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show toolchain
+        run: |
+          flutter --version
+          xcodebuild -version
+
+      # โฟลเดอร์ ios/ ไม่ได้ commit ไว้ เหตุผลเดียวกับ android/
+      - name: Generate ios project
+        working-directory: app
+        run: |
+          cp -r lib "$RUNNER_TEMP/lib_backup"
+          cp pubspec.yaml "$RUNNER_TEMP/pubspec.yaml"
+          flutter create --platforms=ios --project-name telepole_survey_meter --org tools.telepole .
+          rm -rf lib && cp -r "$RUNNER_TEMP/lib_backup" lib
+          cp "$RUNNER_TEMP/pubspec.yaml" pubspec.yaml
+
+      - name: Patch Info.plist
+        working-directory: app
+        run: python3 ../tool/patch_ios.py
+
+      - name: Resolve dependencies
+        working-directory: app
+        run: flutter pub get
+
+      # ไม่เซ็น เพราะการเซ็นต้องใช้ใบรับรองจากบัญชี Apple Developer
+      # ผู้ติดตั้งเซ็นเองด้วย Apple ID ของตัวเองผ่าน Sideloadly / AltStore
+      - name: Build release app
+        working-directory: app
+        run: flutter build ios --release --no-codesign
+
+      # .ipa คือ zip ธรรมดาที่มีโฟลเดอร์ Payload/ ครอบ .app ไว้
+      - name: Package IPA
+        run: |
+          mkdir -p dist "$RUNNER_TEMP/ipa/Payload"
+          cp -R app/build/ios/iphoneos/Runner.app "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/dist/telepole-survey-meter.ipa" Payload)
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: telepole-survey-meter-ipa
+          path: dist/telepole-survey-meter.ipa
+          if-no-files-found: error
+          retention-days: 90
+
+  # สร้าง Release เพื่อให้ได้ลิงก์ไฟล์ตรง ๆ กดโหลดจากมือถือได้เลย ไม่ต้องแตก zip แบบ artifact
+  # รอ ios ด้วยแต่ไม่บังคับให้ผ่าน — ฝั่ง iOS พังต้องไม่ทำให้ APK ออกไม่ได้
+  release:
+    name: Publish release
+    needs: [android, ios]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.android.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Publish release
-        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "build-${{ github.run_number }}"             dist/telepole-survey-meter.apk             --title "APK build #${{ github.run_number }}"             --notes "อัตโนมัติจากคอมมิต ${{ github.sha }}
+          ls -lh dist
+          gh release create "build-${{ github.run_number }}" dist/* \
+            --target "${{ github.sha }}" \
+            --title "Build #${{ github.run_number }}" \
+            --notes "อัตโนมัติจากคอมมิต ${{ github.sha }}
 
-          เซ็นด้วย debug key — ติดตั้งต้องเปิด \"อนุญาตจากแหล่งที่ไม่รู้จัก\""             --latest
+          **Android** — \`telepole-survey-meter.apk\` เซ็นด้วย debug key ติดตั้งต้องเปิด \"อนุญาตจากแหล่งที่ไม่รู้จัก\"
+
+          **iPhone** — \`telepole-survey-meter.ipa\` ยังไม่ได้เซ็น กดติดตั้งตรง ๆ ไม่ได้ ต้องลงผ่าน Sideloadly หรือ AltStore ด้วย Apple ID ของตัวเอง ดูขั้นตอนใน README" \
+            --latest

@@ -1,15 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_classic/flutter_blue_classic.dart';
 
 import '../services/telepole_connection.dart';
+import '../services/transport/meter_transport.dart';
 import '../theme.dart';
 import 'dashboard_screen.dart';
 
-/// หน้าค้นหา/เลือกอุปกรณ์ HC-05
-/// HC-05 เป็น Bluetooth Classic — ปกติต้อง "จับคู่" (pair) ในหน้า Settings ก่อน
+/// หน้าค้นหา/เลือกหัววัด
+/// HC-05 (Bluetooth Classic, Android) ปกติต้อง "จับคู่" ในหน้า Settings ก่อน
 /// จึงแสดงทั้งรายการที่จับคู่แล้วและผลการสแกน
+/// ส่วนโมดูล BLE ไม่ต้องจับคู่ โผล่จากการสแกนอย่างเดียว
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
 
@@ -19,8 +20,8 @@ class ScanScreen extends StatefulWidget {
 
 class _ScanScreenState extends State<ScanScreen> {
   final _connection = TelepoleConnection();
-  final List<BluetoothDevice> _devices = [];
-  StreamSubscription<BluetoothDevice>? _scanSub;
+  final List<MeterDevice> _devices = [];
+  StreamSubscription<MeterDevice>? _scanSub;
   bool _scanning = false;
   bool _connecting = false;
   String? _status;
@@ -34,7 +35,7 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void dispose() {
     _scanSub?.cancel();
-    TelepoleConnection.blue.stopScan();
+    _connection.transport.stopScan();
     _connection.dispose();
     super.dispose();
   }
@@ -48,36 +49,27 @@ class _ScanScreenState extends State<ScanScreen> {
       _status = null;
     });
 
-    final granted = await TelepoleConnection.ensurePermissions();
+    final transport = _connection.transport;
+    final problem = await transport.prepare();
     if (!mounted) return;
-    if (!granted) {
+    if (problem != null) {
       setState(() {
         _scanning = false;
-        _status = 'ไม่ได้รับสิทธิ์ Bluetooth / Location';
+        _status = problem;
       });
       return;
     }
 
-    final on = await TelepoleConnection.ensureBluetoothOn();
-    if (!mounted) return;
-    if (!on) {
-      setState(() {
-        _scanning = false;
-        _status = 'กรุณาเปิด Bluetooth';
-      });
-      return;
-    }
-
-    final bonded = await TelepoleConnection.bondedDevices();
+    final known = await transport.knownDevices();
     if (!mounted) return;
     setState(() {
       _devices
         ..clear()
-        ..addAll(bonded);
+        ..addAll(known);
     });
 
     // สแกนเพิ่มเติมสำหรับอุปกรณ์ที่ยังไม่ได้จับคู่
-    _scanSub = TelepoleConnection.blue.scanResults.listen(
+    _scanSub = transport.scan().listen(
       (device) {
         if (!mounted) return;
         if (_devices.contains(device)) return;
@@ -86,18 +78,17 @@ class _ScanScreenState extends State<ScanScreen> {
       // สแกนล้มเหลวไม่ควรบล็อกการใช้งาน — รายการที่จับคู่แล้วยังใช้ต่อได้
       onError: (_) {},
     );
-    TelepoleConnection.blue.startScan();
 
-    // Android จำกัดเวลาสแกนอยู่แล้ว ตั้ง timer ไว้เพื่อคืนสถานะ UI
+    // ระบบจำกัดเวลาสแกนอยู่แล้ว ตั้ง timer ไว้เพื่อคืนสถานะ UI
     Future.delayed(const Duration(seconds: 14), () {
       if (!mounted) return;
-      TelepoleConnection.blue.stopScan();
+      transport.stopScan();
       setState(() => _scanning = false);
     });
   }
 
   Future<void> _startDemo() async {
-    TelepoleConnection.blue.stopScan();
+    await _connection.transport.stopScan();
     await _scanSub?.cancel();
     _scanSub = null;
     setState(() => _scanning = false);
@@ -109,8 +100,8 @@ class _ScanScreenState extends State<ScanScreen> {
     await _connection.disconnect();
   }
 
-  Future<void> _connect(BluetoothDevice device) async {
-    TelepoleConnection.blue.stopScan();
+  Future<void> _connect(MeterDevice device) async {
+    await _connection.transport.stopScan();
     await _scanSub?.cancel();
     _scanSub = null;
 
@@ -169,7 +160,7 @@ class _ScanScreenState extends State<ScanScreen> {
             ),
           Expanded(
             child: _devices.isEmpty && !busy
-                ? const _EmptyHint()
+                ? _EmptyHint(message: _connection.transport.emptyHint)
                 : ListView.separated(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -217,18 +208,31 @@ class _DemoBar extends StatelessWidget {
 }
 
 class _DeviceTile extends StatelessWidget {
-  final BluetoothDevice device;
+  /// ชื่อโรงงานของโมดูลบลูทูธที่ใช้กับ Arduino ทั้งแบบ Classic และ BLE
+  static const List<String> _likelyNames = [
+    'TELEPOLE',
+    'HC-0',
+    'HMSOFT',
+    'BT05',
+    'AT-09',
+    'JDY',
+    'MLT-BT',
+  ];
+
+  final MeterDevice device;
   final VoidCallback? onTap;
 
   const _DeviceTile({required this.device, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final name = device.alias ?? device.name ?? 'ไม่ทราบชื่อ';
+    final name = device.name;
     final upper = name.toUpperCase();
     // เดาว่าน่าจะเป็นเครื่องของเรา เพื่อให้หาเจอง่ายในรายการยาว ๆ
-    final likely = upper.contains('HC-05') || upper.contains('TELEPOLE');
-    final bonded = device.bondState == BluetoothBondState.bonded;
+    final likely = _likelyNames.any(upper.contains);
+    final bonded = device.isBonded;
+    // id ของ BLE บน iOS เป็น UUID ยาวที่ระบบสุ่มให้ ไม่มีความหมายกับผู้ใช้
+    final label = device.kind == MeterLinkKind.ble ? 'BLE' : device.id;
 
     return Material(
       color: AppTheme.surface,
@@ -246,7 +250,7 @@ class _DeviceTile extends StatelessWidget {
         ),
         title: Text(name),
         subtitle: Text(
-          '${device.address}${bonded ? "  ·  จับคู่แล้ว" : ""}'
+          '$label${bonded ? "  ·  จับคู่แล้ว" : ""}'
           '${device.rssi != null ? "  ·  ${device.rssi} dBm" : ""}',
           style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
         ),
@@ -258,23 +262,27 @@ class _DeviceTile extends StatelessWidget {
 }
 
 class _EmptyHint extends StatelessWidget {
-  const _EmptyHint();
+  final String message;
+
+  const _EmptyHint({required this.message});
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(32),
+    return Padding(
+      padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.bluetooth_disabled, size: 48, color: AppTheme.textMuted),
-          SizedBox(height: 16),
+          const Icon(
+            Icons.bluetooth_disabled,
+            size: 48,
+            color: AppTheme.textMuted,
+          ),
+          const SizedBox(height: 16),
           Text(
-            'ยังไม่พบอุปกรณ์\n'
-            'กรุณาจับคู่ HC-05 ในหน้า Settings ของเครื่อง (PIN 1234 หรือ 0000) '
-            'แล้วกดค้นหาใหม่',
+            message,
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppTheme.textMuted, height: 1.5),
+            style: const TextStyle(color: AppTheme.textMuted, height: 1.5),
           ),
         ],
       ),

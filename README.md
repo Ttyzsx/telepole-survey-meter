@@ -200,7 +200,7 @@ AT+UART=9600,0,0
 
 ---
 
-## 3. ฝั่งแอป Android (Flutter)
+## 3. ฝั่งแอป (Flutter)
 
 ### ติดตั้ง
 
@@ -346,7 +346,7 @@ timestamp,elapsed_s,cpm,cps,usv_h,accumulated_usv
 แพ็กเกจนี้ไม่ประกาศ permission ใด ๆ ใน manifest ของตัวเอง เราจึงต้องประกาศเองทั้งหมด
 — สคริปต์ `tool/patch_android.py` ทำให้อัตโนมัติตอน build ใน CI
 
-## 8. Build APK
+## 8. Build APK และ IPA
 
 ทุกครั้งที่ push ขึ้น `main` GitHub Actions จะ build APK ให้อัตโนมัติ
 ดาวน์โหลดได้จากแท็บ **Actions** → เลือก run ล่าสุด → ส่วน **Artifacts**
@@ -358,3 +358,44 @@ gh run download --name telepole-survey-meter-apk
 
 APK เซ็นด้วย debug key (Flutter ทำให้อัตโนมัติเมื่อไม่มี keystore) ติดตั้งใช้งานได้ปกติ
 แต่อัปโหลดขึ้น Play Store ไม่ได้ ถ้าต้องการก็ต้องสร้าง keystore แล้วเพิ่ม signing config
+
+## 9. ใช้กับ iPhone
+
+แอปตัวเดียวกัน build เป็น iOS ได้ แต่มีข้อจำกัดของ Apple สองเรื่องที่โค้ดแก้ให้ไม่ได้
+
+### iPhone ต่อกับ HC-05 ไม่ได้ ต้องเปลี่ยนเป็นโมดูล BLE
+
+HC-05 เป็น Bluetooth Classic (SPP) ซึ่ง iOS เปิดให้ใช้เฉพาะอุปกรณ์ที่ผ่านโปรแกรม MFi
+ของ Apple HC-05 จึงไม่โผล่ในรายการของ iPhone เลย ทางออกคือเปลี่ยนเป็นโมดูล
+**Bluetooth Low Energy** ที่ทำตัวเป็น serial ใส ๆ เหมือนกัน:
+
+| โมดูล | ใช้กับ | หมายเหตุ |
+|---|---|---|
+| HC-05 (ของเดิม) | Android | iPhone มองไม่เห็น |
+| HM-10 / AT-09 / JDY-23 | iPhone + Android | BLE ล้วน ขาเรียงเหมือน HC-05 |
+| JDY-33 | iPhone + Android | สองโหมดในตัว (SPP + BLE) |
+
+ขาที่ใช้เหมือนเดิมทุกเส้น (VCC, GND, TXD, RXD) และค่าโรงงานเป็น 9600 baud เท่ากัน
+**firmware ไม่ต้องแก้** — Arduino ยังพ่นข้อความออก serial เหมือนเดิม
+ระวังอย่างเดียว: โมดูล BLE ส่วนใหญ่ใช้ไฟ 3.3V ให้ดูหลังบอร์ดว่ารับ 5V ได้หรือไม่ก่อนเสียบ
+
+แอปฝั่ง Android ค้นหาทั้งสองแบบพร้อมกัน เปลี่ยนโมดูลแล้วเครื่อง Android เดิมยังต่อได้
+โมดูล BLE **ไม่ต้องจับคู่ใน Settings** เปิดแอปแล้วกดค้นหาได้เลย
+
+### ติดตั้งลง iPhone
+
+iOS ไม่มีการกดไฟล์แล้วติดตั้งแบบ APK ทุกแอปต้องถูกเซ็นด้วยบัญชี Apple
+CI จึง build เป็น `telepole-survey-meter.ipa` ที่ **ยังไม่ได้เซ็น** แนบไว้ใน Releases
+แล้วให้ผู้ติดตั้งเซ็นด้วย Apple ID ของตัวเอง (ฟรี):
+
+1. ลง [Sideloadly](https://sideloadly.io) และ iTunes บนคอม (Windows หรือ Mac)
+2. โหลด `telepole-survey-meter.ipa` จากหน้า Releases
+3. เสียบ iPhone เข้าคอม เปิด Sideloadly ลากไฟล์ `.ipa` ใส่ ใส่ Apple ID แล้วกด Start
+4. บน iPhone: Settings → General → VPN & Device Management → กด Trust ที่ Apple ID ตัวเอง
+5. iOS 16 ขึ้นไป: Settings → Privacy & Security → เปิด Developer Mode แล้วรีสตาร์ต
+
+ข้อจำกัดของ Apple ID ฟรี: แอปหมดอายุทุก **7 วัน** ต้องเสียบแล้วกด Start ซ้ำ
+(ข้อมูลในแอปไม่หาย) ถ้าต้องการให้คนอื่นกดลิงก์แล้วติดตั้งได้เลยและอยู่ได้ 90 วัน
+ต้องสมัคร Apple Developer Program ($99/ปี) แล้วแจกผ่าน TestFlight
+
+ไฟล์ CSV ของการสำรวจอยู่ในแอป Files → On My iPhone → Telepole

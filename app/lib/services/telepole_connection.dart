@@ -3,25 +3,27 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_blue_classic/flutter_blue_classic.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../models/reading.dart';
+import 'transport/meter_transport.dart';
 
 enum LinkState { idle, connecting, connected, disconnected, error }
 
-/// จัดการการเชื่อมต่อ Bluetooth Classic (SPP) กับ HC-05
+/// จัดการการเชื่อมต่อกับหัววัด ผ่าน [MeterTransport] ที่เลือกตามแพลตฟอร์ม
 /// แปลง byte stream เป็น [Reading] ทีละบรรทัด และเป็นเจ้าของค่าที่ derive มาจาก CPM
 class TelepoleConnection extends ChangeNotifier {
-  static final FlutterBlueClassic blue = FlutterBlueClassic();
+  final MeterTransport transport;
 
-  BluetoothConnection? _connection;
+  TelepoleConnection({MeterTransport? transport})
+      : transport = transport ?? MeterTransport.forPlatform();
+
+  MeterLink? _link;
   StreamSubscription<Uint8List>? _sub;
   String _rxBuffer = '';
 
   LinkState _state = LinkState.idle;
   String? _errorMessage;
-  BluetoothDevice? _device;
+  MeterDevice? _device;
   Reading? _latest;
 
   final List<Reading> _history = [];
@@ -41,7 +43,7 @@ class TelepoleConnection extends ChangeNotifier {
 
   LinkState get state => _state;
   String? get errorMessage => _errorMessage;
-  BluetoothDevice? get device => _device;
+  MeterDevice? get device => _device;
   Reading? get latest => _latest;
   List<Reading> get history => List.unmodifiable(_history);
   bool get isConnected => _state == LinkState.connected;
@@ -139,58 +141,26 @@ class TelepoleConnection extends ChangeNotifier {
     return sqrt(-2.0 * log(u1)) * cos(2.0 * pi * u2);
   }
 
-  /// ขอ permission ที่จำเป็น (Android 12+ ใช้ BLUETOOTH_CONNECT/SCAN,
-  /// ต่ำกว่านั้นใช้ location)
-  static Future<bool> ensurePermissions() async {
-    final results = await [
-      Permission.bluetoothConnect,
-      Permission.bluetoothScan,
-      Permission.location,
-    ].request();
-    // บาง OS จะคืน permanentlyDenied สำหรับ permission ที่ไม่มีอยู่จริงในเวอร์ชันนั้น
-    return results[Permission.bluetoothConnect]?.isGranted == true ||
-        results[Permission.location]?.isGranted == true;
-  }
-
-  static Future<List<BluetoothDevice>> bondedDevices() async {
-    try {
-      return await blue.bondedDevices ?? const [];
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  static Future<bool> ensureBluetoothOn() async {
-    try {
-      if (await blue.isEnabled) return true;
-      return await blue.turnOn();
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<void> connect(BluetoothDevice device) async {
+  Future<void> connect(MeterDevice device) async {
     await disconnect();
 
     _device = device;
     _setState(LinkState.connecting);
 
     try {
-      final connection = await blue.connect(device.address);
-      if (connection == null) {
-        _fail('เชื่อมต่อไม่สำเร็จ — ตรวจสอบว่าจับคู่ HC-05 แล้วและเครื่องเปิดอยู่');
-        return;
-      }
-      _connection = connection;
+      final link = await transport.connect(device);
+      _link = link;
       _rxBuffer = '';
       _lastIntegratedAt = null;
-      _sub = connection.input?.listen(
+      _sub = link.input.listen(
         _onData,
         onDone: () => _setState(LinkState.disconnected),
         onError: (Object e) => _fail('การเชื่อมต่อขาดหาย: $e'),
         cancelOnError: true,
       );
       _setState(LinkState.connected);
+    } on MeterLinkException catch (e) {
+      _fail(e.message);
     } catch (e) {
       _fail('เชื่อมต่อไม่สำเร็จ: $e');
     }
@@ -240,9 +210,7 @@ class TelepoleConnection extends ChangeNotifier {
   }
 
   void _send(String command) {
-    final connection = _connection;
-    if (connection == null || !connection.isConnected) return;
-    connection.writeString(command);
+    _link?.write(command);
   }
 
   /// รีเซ็ตค่าสะสมทั้งฝั่งแอปและฝั่ง firmware ('R')
@@ -269,11 +237,11 @@ class TelepoleConnection extends ChangeNotifier {
     await _sub?.cancel();
     _sub = null;
     try {
-      await _connection?.close();
+      await _link?.close();
     } catch (_) {
       // ปิดไม่สำเร็จไม่ควรทำให้ UI ค้าง — ปล่อยผ่านแต่ยังเคลียร์ state
     }
-    _connection = null;
+    _link = null;
     if (_state != LinkState.idle) _setState(LinkState.disconnected);
   }
 
@@ -293,7 +261,7 @@ class TelepoleConnection extends ChangeNotifier {
   void dispose() {
     _demoTimer?.cancel();
     _sub?.cancel();
-    _connection?.dispose();
+    _link?.close().catchError((Object _) {});
     super.dispose();
   }
 }

@@ -1,5 +1,5 @@
 name: telepole_survey_meter
-description: Wireless telescopic radiation survey meter dashboard (HC-05 / Arduino Uno).
+description: Wireless telescopic radiation survey meter dashboard (Arduino Uno over Bluetooth).
 publish_to: "none"
 version: 1.0.0+1
 
@@ -11,6 +11,9 @@ dependencies:
     sdk: flutter
   # Bluetooth Classic (SPP) — HC-05 ต้องใช้ classic ไม่ใช่ BLE
   flutter_blue_classic: ^0.1.1
+  # Bluetooth LE — ทางเดียวที่ iPhone ต่อกับ Arduino ได้ (HM-10 / AT-09 / JDY-23)
+  # ตรึงไว้ที่ 1.x เพราะ 2.x เปลี่ยนสัญญาอนุญาตจาก BSD เป็นแบบมีเงื่อนไข
+  flutter_blue_plus: ^1.35.5
   permission_handler: ^13.0.1
   fl_chart: ^0.68.0
   vibration: ^3.2.0
